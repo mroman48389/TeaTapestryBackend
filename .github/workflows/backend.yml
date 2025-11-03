@@ -1,0 +1,61 @@
+# CI/CD: GitHub Actions workflow for automated linting and other CI/CD on push/pull requests.
+name: Backend CI/CD  # workflow name (shows up in GitHub Actions tab)
+
+# GitHub will run this workflow on pushes and pull requests for the "main" (production) branch.
+on:
+    # Tried a branch-based approach on the frontend. Trying a file-type based approach here just to
+    # get experience in both types.  So instead of running jobs when main is pushed/pulled, it will 
+    # run them when py or yml files are changed.
+    push:
+        paths:
+            - '**.py'
+            - '.github/workflows/backend.yml'
+    pull_request:
+        paths:
+          - '**.py'
+
+jobs:
+    # Define a job, linting and testing coverage, to run on the GitHub Ubuntu virtual machine.
+    linting-and-testing:
+        runs-on: ubuntu-latest
+
+        # Tell GitHub Actions to inject secret values into the environment for backend use.
+        # env:
+        #     SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        #     SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+    
+        steps:
+            # Check out the repo code.
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            # Install Python in virtual environment with version 4 of setup-python in GitHub Action.
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: '3.13'
+
+            # Install dependencies using specified package.json.
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install -r requirements.txt
+                  pip install flake8 pytest coverage
+
+            - name: Run linting with Flake8
+              run: flake8 .
+
+            - name: Run tests with Pytest
+              run: pytest
+
+            - name: Measure test coverage
+              run: |
+                  coverage run -m pytest
+                  coverage report
+                  coverage xml
+
+            - name: Upload coverage to GitHub 
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-report
+                  path: coverage.xml
