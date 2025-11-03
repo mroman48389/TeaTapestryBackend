@@ -10,6 +10,7 @@ on:
         paths:
             - '**.py'
             - '.github/workflows/backend.yml'
+            - 'requirements.txt'
     pull_request:
         paths:
           - '**.py'
