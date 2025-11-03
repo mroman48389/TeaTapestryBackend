@@ -29,3 +29,11 @@ app = FastAPI()
 async def root():
     # Return simple message as a JSON response to confirm server is running.
     return {"message": "Tea Tapestry backend is alive!"}
+
+
+@app.get("/version")
+def get_version():
+    # Format: major.minor.patch, where major = breaking changes that affect
+    # backwards compatibility, minor = new features, changes that are
+    # backward compatible, patch = bug fixes with no breaking changes
+    return {"version": "1.0.0"}
