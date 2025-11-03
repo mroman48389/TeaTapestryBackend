@@ -45,14 +45,13 @@ jobs:
             - name: Run linting with Flake8
               run: flake8 .
 
-            - name: Run tests with Pytest
-              run: pytest
-
-            - name: Measure test coverage
-              run: |
-                  coverage run -m pytest
-                  coverage report
-                  coverage xml
+            # pytest --cov=app runs tests and coverage, 
+            # --cov-report=term-missing shows lines not covered by tests,
+            # PYTHONPATH: . ensures "from app.main import app" works in CI
+            - name: Run tests with coverage
+              run: pytest --cov=app --cov-report=term-missing
+              env:
+                  PYTHONPATH: .
 
             - name: Upload coverage to GitHub 
               uses: actions/upload-artifact@v4
