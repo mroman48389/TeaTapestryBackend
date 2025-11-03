@@ -29,5 +29,3 @@ app = FastAPI()
 async def root():
     # Return simple message as a JSON response to confirm server is running.
     return {"message": "Tea Tapestry backend is alive!"}
-
-print("This is a very long line that exceeds the 79 character limit and should be flagged.")
