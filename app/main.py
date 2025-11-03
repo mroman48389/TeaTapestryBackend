@@ -2,9 +2,19 @@
 # and docs.
 from fastapi import FastAPI
 
+from fastapi.middleware.cors import CORSMiddleware
+
 # Create instance of FastAPI. All routes, middleware, and configurations will
 # flow through this.
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Define GET endpoint, telling FastAPI to respond to HTTP GET requests at the
 # root URL. async "root" function allows us to handle concurrent requests
