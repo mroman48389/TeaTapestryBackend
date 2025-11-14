@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
-from app.main import app
 import sys
 import os
+
+from src.app.main import app
+
 sys.path.insert(
     0,
     os.path.abspath(
