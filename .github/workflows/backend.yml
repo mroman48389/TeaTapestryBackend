@@ -20,6 +20,9 @@ jobs:
     linting-and-testing:
         runs-on: ubuntu-latest
 
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+
         # Tell GitHub Actions to inject secret values into the environment for backend use.
         # env:
         #     SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
