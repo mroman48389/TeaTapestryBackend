@@ -1,8 +1,9 @@
 from src.utils.session_utils import get_session
-from ingest.staging import create_staging_table, insert_into_staging
-from ingest.validate import remove_duplicates
-from ingest.upsert import upsert_from_staging
-from utils.csv_utils import load_and_clean_csv
+from src.ingest.staging import create_staging_table, insert_into_staging
+from src.ingest.validate import remove_duplicates
+from src.ingest.upsert import upsert_from_staging
+from src.utils.csv_utils import load_and_clean_csv
+
 
 def ingest_data(csv_path: str, model, required_fields, conflict_cols: list[str]):
     df = load_and_clean_csv(csv_path, model, required_fields)

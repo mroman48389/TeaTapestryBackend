@@ -26,6 +26,7 @@ class TeaProfileFields:
     WET_LEAF_APPEARANCE = "wet_leaf_appearance"
     WET_LEAF_AROMA = "wet_leaf_aroma"
 
+
 REQUIRED_TEA_PROFILE_FIELDS = [
     TeaProfileFields.ID,
     TeaProfileFields.NAME,

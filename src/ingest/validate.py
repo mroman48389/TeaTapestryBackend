@@ -2,7 +2,8 @@
 
 from sqlalchemy import text
 
-from utils.staging_utils import get_staging_table_name
+from src.utils.staging_utils import get_staging_table_name
+
 
 def remove_duplicates(session, base_table: str):
     staging_table = get_staging_table_name(base_table)
@@ -12,7 +13,7 @@ def remove_duplicates(session, base_table: str):
     # table for the tea name.
     #
     # SELECT name FROM {base_table} -->
-    #   Returns all values in the "name" column of the 
+    #   Returns all values in the "name" column of the
     #   database as a result set.
     #
     # WHERE name IN -->

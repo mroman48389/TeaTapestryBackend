@@ -6,21 +6,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.db.base import Base, engine
 from src.seed.seed_tea_profiles import seed_tea_profiles
-from db.models.tea_profiles_model import TeaProfile
-from constants.tea_profiles_constants import REQUIRED_TEA_PROFILE_FIELDS
-from ingest.ingest import ingest_data
-
+# from src.db.models.tea_profiles_model import TeaProfile
+# from src.constants.tea_profiles_constants import REQUIRED_TEA_PROFILE_FIELDS
+# from src.ingest.ingest import ingest_data
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # This code runs before the app starts:
 
-    # Create tables for all models that inherit from Base 
+    # Create tables for all models that inherit from Base
     # if they don't exist yet. Only needs to run once.
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind = engine)
 
     seed_tea_profiles()
-    ingest_data("data/ingestion/new_teas.csv", TeaProfile, REQUIRED_TEA_PROFILE_FIELDS, ["name"])
+    # ingest_data("data/ingestion/new_teas.csv", TeaProfile, REQUIRED_TEA_PROFILE_FIELDS, ["name"])
 
     # Tell FastAPI that startup is Continues startup
     yield
@@ -31,14 +30,14 @@ async def lifespan(app: FastAPI):
 
 # Create instance of FastAPI. All routes, middleware, and configurations will
 # flow through this.
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan = lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins = ["http://localhost:5173"],
+    allow_credentials = True,
+    allow_methods = ["*"],
+    allow_headers = ["*"],
 )
 
 # Define GET endpoint, telling FastAPI to respond to HTTP GET requests at the
@@ -59,12 +58,10 @@ app.add_middleware(
 # local machine. You can replace the number in the following URL with
 # "localhost".
 
-
 @app.get("/")
 async def root():
     # Return simple message as a JSON response to confirm server is running.
     return {"message": "Tea Tapestry backend is alive!"}
-
 
 @app.get("/version")
 def get_version():

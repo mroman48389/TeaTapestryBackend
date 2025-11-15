@@ -29,38 +29,40 @@ from src.utils.csv_utils import parse_array, parse_numeric
 
 # To create the database (one time before running the code below), do the following in PowerShell,
 #
-# First, connect to psql using your username. If username has special 
+# First, connect to psql using your username. If username has special
 # characters, use those instead of what you entered in the env file)
-#   
-#     psql -U [username] -h localhost 
-#   
+#
+#     psql -U [username] -h localhost
+#
 # Then create the database:
-#       
+#
 #     CREATE DATABASE tea_profiles;
 #
 # Use \l to list all dtabases and confirm it was created. Then quit/exit psql:
-#   
-#     psql \q 
+#
+#     psql \q
 
 def seed_tea_profiles():
 
     with get_session() as session:
+
         # If there are no rows in the database, seed it. query(TeaProfile)
         # grabs the tea_profiles table, using the TeaProfile model to define
-        # its structure. 
-        # 
+        # its structure.
+        #
         # SQL: SELECT COUNT(*) FROM tea_profiles;
+
         if session.query(TeaProfile).count() == 0:
-            print("test 2")
+
             # with is a context manager. Behind the scenes, it's doing the
-            # following: 
+            # following:
             #
             #   csvfile = open('data/seeds/tea_profiles_2025-11-12.csv', newline = '').__enter__()
             #   try:
             #       # do stuff
             #   finally:
             #       open('data/seeds/tea_profiles_2025-11-12.csv', newline = '').__exit__()
-            #
+
             with open('data/seeds/tea_profiles_2025-11-12.csv', newline = '') as csvfile:
                 reader = csv.DictReader(csvfile)
 

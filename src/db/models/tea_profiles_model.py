@@ -1,113 +1,129 @@
 from sqlalchemy import Column, Integer, String, Numeric, ARRAY, Text
 
 from src.db.base import Base
-
 from src.constants.tea_profiles_constants import TeaProfileFields, REQUIRED_TEA_PROFILE_FIELDS
 from src.constants.model_metadata_constants import DELIMITER_INFO_DICT, IS_PRICE_INFO_DICT
 
 def is_nullable(field: str) -> bool:
-    return field not in REQUIRED_TEA_PROFILE_FIELDS
+    return field not in REQUIRED_TEA_PROFILE_FIELDS   
 
 class TeaProfile(Base):
-    # SQLAlchemy needs this dunder to be called tablename to
-    # do its mapping.
+    # SQLAlchemy needs this dunder to be called tablename to do its mapping.
     __tablename__ = "tea_profiles"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key = True)
 
     # most common English name, ex: Dragon Well
-    name = Column(String, 
-        nullable=is_nullable(TeaProfileFields.NAME)
-    )
+    name = Column(String, nullable = is_nullable(TeaProfileFields.NAME))
+
     # ex: Dragon Well is Longjing, Lung Ching as well
-    alternative_names = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.ALTERNATIVE_NAMES),
-        info=DELIMITER_INFO_DICT
+    alternative_names = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.ALTERNATIVE_NAMES),
+        info = DELIMITER_INFO_DICT
     )
+
     # green, white, yellow, oolong, black/red, dark (pu-erh), non-camellia
     # sinensis (herbal, rooibos, yerba mate, tulsi, chai, camellia taliensis)
-    tea_type = Column(String, 
-        nullable=is_nullable(TeaProfileFields.TEA_TYPE)
-    )
+    tea_type = Column(String, nullable=is_nullable(TeaProfileFields.TEA_TYPE))
+
     # ex: Qunti Zhong, Longjing #43 for Dragon Well
-    cultivars = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.CULTIVARS),
-        info=DELIMITER_INFO_DICT
+    cultivars = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.CULTIVARS),
+        info = DELIMITER_INFO_DICT
     )
+
     # pan-fired, steamed, scented/flavored, etc,
-    processing = Column(Text, 
-        nullable=is_nullable(TeaProfileFields.PROCESSING)
-    )
+    processing = Column(Text, nullable = is_nullable(TeaProfileFields.PROCESSING))
+
     # ex: Dragonwell is very low (typically 0%)
-    oxidation_level = Column(String, 
-        nullable=is_nullable(TeaProfileFields.OXIDATION_LEVEL)
-    )
+    oxidation_level = Column(String, nullable = is_nullable(TeaProfileFields.OXIDATION_LEVEL))
+
     # top 10 famous Chinese tea? geographically protected? story behind name,
     # etc.
-    cultural_significance = Column(Text, 
-        nullable=is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE)
+    cultural_significance = Column(
+        Text, 
+        nullable = is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE)
     )
-    cultural_significance_source = Column(String, 
-        nullable=is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE_SOURCE)
+
+    cultural_significance_source = Column(
+        String, 
+        nullable = is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE_SOURCE)
     )
 
     # ex: China
-    country_of_origin = Column(String, 
-        nullable=is_nullable(TeaProfileFields.COUNTRY_OF_ORIGIN)
-    )  
+    country_of_origin = Column(
+        String,
+        nullable = is_nullable(TeaProfileFields.COUNTRY_OF_ORIGIN)
+    )
+    
     # As much info as available, such as Hangzhou (city), Zhejiang (province)
     # for Dragon Well
-    subregions = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.SUBREGIONS),
-        info=DELIMITER_INFO_DICT
+    subregions = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.SUBREGIONS),
+        info = DELIMITER_INFO_DICT
     )
     # not sure how to get this information easily yet
-    avg_price_per_oz_usd = Column(Numeric(7, 2), 
-        nullable=is_nullable(TeaProfileFields.AVG_PRICE_PER_OZ_USD),
-        info=IS_PRICE_INFO_DICT
+    avg_price_per_oz_usd = Column(
+        Numeric(7, 2),
+        nullable = is_nullable(TeaProfileFields.AVG_PRICE_PER_OZ_USD),
+        info = IS_PRICE_INFO_DICT
     )
 
-    liquor_appearance = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.LIQUOR_APPEARANCE),
-        info=DELIMITER_INFO_DICT
+    liquor_appearance = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.LIQUOR_APPEARANCE),
+        info = DELIMITER_INFO_DICT
     )
-    liquor_aroma = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.LIQUOR_AROMA),
-        info=DELIMITER_INFO_DICT
+
+    liquor_aroma = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.LIQUOR_AROMA),
+        info  =DELIMITER_INFO_DICT
     )
     # includes aftertaste, hui gan, etc,
-    liquor_taste = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.LIQUOR_TASTE),
-        info=DELIMITER_INFO_DICT
+    liquor_taste = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.LIQUOR_TASTE),
+        info = DELIMITER_INFO_DICT
     )
+
     # includes astringency, etc,
-    liquor_body_mouthfeel = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.LIQUOR_BODY_MOUTHFEEL),
-        info=DELIMITER_INFO_DICT
-    ) 
+    liquor_body_mouthfeel = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.LIQUOR_BODY_MOUTHFEEL),
+        info = DELIMITER_INFO_DICT
+    )
     # calming, mouth-watering, alert, astringent, etc.
-    body_effect = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.BODY_EFFECT),
-        info=DELIMITER_INFO_DICT
+    body_effect = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.BODY_EFFECT),
+        info = DELIMITER_INFO_DICT
     )
 
     # flat, curled, rolled, different color shades, relative leaf size, etc.
-    dry_leaf_appearance = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.DRY_LEAF_APPEARANCE),
-        info=DELIMITER_INFO_DICT
+    dry_leaf_appearance = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.DRY_LEAF_APPEARANCE),
+        info = DELIMITER_INFO_DICT
     )
-    dry_leaf_aroma = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.DRY_LEAF_AROMA),
-        info=DELIMITER_INFO_DICT
+    dry_leaf_aroma = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.DRY_LEAF_AROMA),
+        info = DELIMITER_INFO_DICT
     )
 
-    wet_leaf_appearance = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.WET_LEAF_APPEARANCE),
-        info=DELIMITER_INFO_DICT
+    wet_leaf_appearance = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.WET_LEAF_APPEARANCE),
+        info = DELIMITER_INFO_DICT
     )
-    wet_leaf_aroma = Column(ARRAY(String), 
-        nullable=is_nullable(TeaProfileFields.WET_LEAF_AROMA),
-        info=DELIMITER_INFO_DICT
+    wet_leaf_aroma = Column(
+        ARRAY(String),
+        nullable = is_nullable(TeaProfileFields.WET_LEAF_AROMA),
+        info = DELIMITER_INFO_DICT
     )
 
     # SQL:
@@ -143,4 +159,3 @@ class TeaProfile(Base):
     #
     #
     # Note that SERIAL is an auto-incrementing INTEGER
-

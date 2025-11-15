@@ -41,16 +41,22 @@ jobs:
               run: |
                   python -m pip install --upgrade pip
                   pip install -r requirements.txt
-                  pip install flake8 pytest coverage
+                  pip install pytest coverage
 
-            - name: Run linting with Flake8
-              run: flake8 .
+            # - name: Run linting with Flake8
+            #   run: flake8 .
+
+            - name: Install Ruff
+              run: pip install ruff
+
+            - name: Run Ruff
+              run: ruff check . --fix
 
             # pytest --cov=app runs tests and coverage, 
             # --cov-report=term-missing shows lines not covered by tests,
             # PYTHONPATH: . ensures "from app.main import app" works in CI
             - name: Run tests with coverage
-              run: pytest --cov=app --cov-report=term-missing
+              run: pytest --cov=app --cov-report=term-missing --cov-report=xml
               env:
                   PYTHONPATH: .
 

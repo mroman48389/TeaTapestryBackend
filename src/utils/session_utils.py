@@ -2,8 +2,9 @@ from contextlib import contextmanager
 
 from src.db.base import SessionLocal
 
-# Note that there is a built-in SQLAlchemy context manager, but 
+# Note that there is a built-in SQLAlchemy context manager, but
 # this one lets us add custom code.
+
 @contextmanager
 def get_session():
     # Open a new SQLAlchemy session so we can talk to the database.
