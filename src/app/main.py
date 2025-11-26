@@ -5,10 +5,6 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.db.base import Base, engine
-from src.seed.seed_tea_profiles import seed_tea_profiles
-# from src.db.models.tea_profiles_model import TeaProfile
-# from src.constants.tea_profiles_constants import REQUIRED_TEA_PROFILE_FIELDS
-# from src.ingest.ingest import ingest_data
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -17,9 +13,6 @@ async def lifespan(app: FastAPI):
     # Create tables for all models that inherit from Base
     # if they don't exist yet. Only needs to run once.
     Base.metadata.create_all(bind = engine)
-
-    seed_tea_profiles()
-    # ingest_data("data/ingestion/new_teas.csv", TeaProfile, REQUIRED_TEA_PROFILE_FIELDS, ["name"])
 
     # Tell FastAPI that startup is Continues startup
     yield

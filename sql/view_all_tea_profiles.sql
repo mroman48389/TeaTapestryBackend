@@ -1,0 +1,1 @@
+SELECT * FROM tea_profiles;

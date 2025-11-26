@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Numeric, ARRAY, Text
+from sqlalchemy import Column, Integer, String, Numeric, Text
 
 from src.db.base import Base
+from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.tea_profiles_constants import TeaProfileFields, REQUIRED_TEA_PROFILE_FIELDS
 from src.constants.model_metadata_constants import DELIMITER_INFO_DICT, IS_PRICE_INFO_DICT
 
@@ -13,12 +14,20 @@ class TeaProfile(Base):
 
     id = Column(Integer, primary_key = True)
 
-    # most common English name, ex: Dragon Well
-    name = Column(String, nullable = is_nullable(TeaProfileFields.NAME))
+    # most common English name, ex: Dragon Well. Tell Postgres it
+    # can rely on the name being unique when we use ON CONFLICT to solve
+    # conflicts on upserting. When cleaning CSVs in our pipleline, we 
+    # try to remove duplicates, but the database constraint is the final
+    # safeguar.
+    name = Column(
+        String, 
+        nullable = is_nullable(TeaProfileFields.NAME),
+        unique = True
+    )
 
-    # ex: Dragon Well is Longjing, Lung Ching as well
+    # ex: Dragon Well is Longjing, Lung Ching as well.
     alternative_names = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.ALTERNATIVE_NAMES),
         info = DELIMITER_INFO_DICT
     )
@@ -29,7 +38,7 @@ class TeaProfile(Base):
 
     # ex: Qunti Zhong, Longjing #43 for Dragon Well
     cultivars = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.CULTIVARS),
         info = DELIMITER_INFO_DICT
     )
@@ -61,7 +70,7 @@ class TeaProfile(Base):
     # As much info as available, such as Hangzhou (city), Zhejiang (province)
     # for Dragon Well
     subregions = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.SUBREGIONS),
         info = DELIMITER_INFO_DICT
     )
@@ -73,55 +82,55 @@ class TeaProfile(Base):
     )
 
     liquor_appearance = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.LIQUOR_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
 
     liquor_aroma = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.LIQUOR_AROMA),
         info  =DELIMITER_INFO_DICT
     )
     # includes aftertaste, hui gan, etc,
     liquor_taste = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.LIQUOR_TASTE),
         info = DELIMITER_INFO_DICT
     )
 
     # includes astringency, etc,
     liquor_body_mouthfeel = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.LIQUOR_BODY_MOUTHFEEL),
         info = DELIMITER_INFO_DICT
     )
     # calming, mouth-watering, alert, astringent, etc.
     body_effect = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.BODY_EFFECT),
         info = DELIMITER_INFO_DICT
     )
 
     # flat, curled, rolled, different color shades, relative leaf size, etc.
     dry_leaf_appearance = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.DRY_LEAF_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
     dry_leaf_aroma = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.DRY_LEAF_AROMA),
         info = DELIMITER_INFO_DICT
     )
 
     wet_leaf_appearance = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.WET_LEAF_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
     wet_leaf_aroma = Column(
-        ARRAY(String),
+        SQLiteCompatibleArray(),
         nullable = is_nullable(TeaProfileFields.WET_LEAF_AROMA),
         info = DELIMITER_INFO_DICT
     )

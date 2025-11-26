@@ -3,6 +3,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from dotenv import load_dotenv
 import os
+import urllib.parse
 
 # Load variables from .env into environment
 load_dotenv()
@@ -12,10 +13,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
     # Fall back to building Postgres URL from individual parts
-    DATABASE_URL = (
-        f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}"
-        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-    )
+    user = os.getenv("DB_USER")
+    # In case our password has special character in our .env file, we need to
+    # encode them to prevent breaks.(Characters like @, !, #, etc.)
+    password_raw = os.getenv("DB_PASS") or ""
+    password = urllib.parse.quote_plus(password_raw)
+    host = os.getenv("DB_HOST")
+    port = os.getenv("DB_PORT")
+    db   = os.getenv("DB_NAME")
+
+    DATABASE_URL = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
 
 # Create a connection to the PostgreSQL database. engine is an
 # instance of the SQLAlchemy engine. SQLAlchemy will use this

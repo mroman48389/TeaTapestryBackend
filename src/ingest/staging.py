@@ -3,10 +3,13 @@
 from sqlalchemy import text
 
 from src.utils.staging_utils import get_staging_table_name
+from src.utils.model_utils import get_dtype_mapping
 
 def create_staging_table(session, base_table: str):
-    staging_table = get_staging_table_name(base_table)
+    staging_table = get_staging_table_name(session, base_table)
 
+    # For the PostgreSQL dialect:
+    #
     # CREATE SCHEMA IF NOT EXISTS staging; -->
     #
     #   Ensure staging scheme exists.
@@ -26,14 +29,46 @@ def create_staging_table(session, base_table: str):
     #
     #   Clear old data.
     #
-    session.execute(text(f"""
-        CREATE SCHEMA IF NOT EXISTS staging;
-        CREATE UNLOGGED TABLE IF NOT EXISTS {staging_table}
-        (LIKE {base_table} INCLUDING ALL);
-        TRUNCATE TABLE {staging_table};
-    """))
+    dialect = session.bind.dialect.name
 
-def insert_into_staging(df, table_name: str, engine):
+    if dialect == "postgresql":
+        session.execute(text(f"""
+            CREATE SCHEMA IF NOT EXISTS staging;
+            CREATE UNLOGGED TABLE IF NOT EXISTS {staging_table}
+            (LIKE {base_table} INCLUDING ALL);
+            TRUNCATE TABLE {staging_table};
+        """))
+
+    elif dialect == "sqlite":
+        session.execute(text(f"""
+            CREATE TABLE IF NOT EXISTS {staging_table} AS
+            SELECT * FROM {base_table} WHERE 0;
+        """))
+        session.execute(text(f"DELETE FROM {staging_table};"))
+
+    # Necessary because of the CREATE SCHEMA
+    session.commit()
+
+def insert_into_staging(df, table_name: str, model, engine):
+    # Ensure DataFrame has all model columns. When 
+    # SQLite is used, it clones the schema of tea_profiles
+    # in create_staging_table, including the id column. This
+    # won't affect PostgreSQL, which will automatically
+    # generate the id.
+    cols = [col.name for col in model.__table__.columns]
+
+    for col in cols:
+        if col not in df.columns:
+            df[col] = None
+
+    # reorder to match table schema
+    df = df[cols]  
+
+    # Explicitly cast to string/numeric where needed
+    for col in df.columns:
+        if df[col].dtype == "object":
+            df[col] = df[col].astype(str)
+
     # Load Pandas DataFrame into staging table.
 
     # Push DataFrame rows into SQLAlchemy database.
@@ -44,11 +79,21 @@ def insert_into_staging(df, table_name: str, engine):
     # a column.
     #
     # method="multi" uses batched inserts for efficiency.
-    df.to_sql(
-        name = table_name,
-        con = engine,
-        schema = "staging",
-        if_exists = "append",
-        index = False,
-        method= " multi"
-    )
+    kwargs = {
+        "name": table_name,
+        "con": engine,
+        "if_exists": "append",
+        "index": False,
+        "dtype": get_dtype_mapping(model),
+        "method": "multi",
+    }
+
+    # Add schema for PostgreSQL and leave out completely for SQLite,
+    # which does not support staging.
+    if engine.dialect.name == "postgresql":
+        kwargs["schema"] = "staging"
+
+    # print("DataFrame about to insert:\n", df)
+    # print("DataFrame dtypes:\n", df.dtypes)
+
+    df.to_sql(**kwargs)

@@ -9,3 +9,10 @@ exclude = ["venv", "__pycache__", ".git", "migrations", ".mypy_cache", ".pytest_
 ignore = ["E201", "E202"]
 select = ["E", "F"]  # enable pycodestyle (E) and pyflakes (F)
 extend-select = ["E501"] # Explicitly turn on E501 (line too long)
+
+[tool.coverage.run]
+# exclude runner files in src/app
+omit = [
+    "src/app/ingest_tea_profiles.py",
+    "src/app/seed_tea_profiles.py",
+]
