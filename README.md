@@ -1,19 +1,45 @@
 # TeaTapestryBackend
-Backend for Tea Tapestry app
 
-Current version: `v1.0.0`
+	Currently provides endpoints for retrieving tea profile data for the Tea Tapestry app.
 
-### Versioning Strategy
-- All breaking changes will trigger a new major version (`v2`, `v3`, etc.)
-- Minor updates and new features will increment the minor version (`v1.1`, `v1.2`, etc.)
-- Bug fixes will increment the patch version (`v1.0.1`, `v1.0.2`, etc.)
+# Purpose
 
-### Upgrade Instructions
-- Clients using `/api/v1/` will remain supported until deprecated
-- To upgrade, switch your base URL to `/api/v2/` and review the changelog below
+	Provides endpoints for retrieving data on teas and manages user sessions.
 
-### Changelog
-#### v1.0.0
-- Initial release
-- `/version` endpoint added
-<!-- - `/api/v1/teas` returns static list of teas -->
+# Stack
+
+	Python, FastAPI, PostgreSQL, SQLAlchemy, Pandas, Pytest, Ruff, PowerShell.
+
+# Features
+
+	- TeaProfile model.
+	- Seeding and ingestion pipeline for tea profiles.
+	- PowerShell scripts for seeding, ingestion, testing, linting, and general development.
+	- 100% testing coverage.
+
+# Installation and Setup
+
+	git clone https://github.com/mroman48389/TeaTapestryBackend.git
+	Set-Location TeaTapestryBackend
+	pip install -r requirements.txt
+	
+# Testing
+
+	Currently done via SQLite databases along with mock tests to cover Postgres branches.
+
+# Versioning
+
+	- **Major** (`v2`, `v3`, etc.): Breaking changes.
+	- **Minor** (`v1.1`, `v1.2`, etc.): New features and minor updates.
+	- **Patch** (`v1.0.1`, `v1.0.2`, etc.): Bug fixes.
+
+# Upgrade Instructions
+
+	- Clients using `/api/v1/` will remain supported until deprecated.
+	- To upgrade, switch your base URL to `/api/v2/`, and review the changelog below.
+
+# Changelog
+
+	**v1.0.0**
+		- Initial release.
+		- `/version` endpoint added.
