@@ -2,15 +2,15 @@
 
 > Currently provides endpoints for retrieving tea profile data for the Tea Tapestry app.
 
-# Purpose
+## Purpose
 
 > Provides endpoints for retrieving data on teas and manages user sessions.
 
-# Stack
+## Stack
 
 > Python, FastAPI, PostgreSQL, SQLAlchemy, Pandas, Pytest, Ruff, PowerShell.
 
-# Features
+## Features
 
 - TeaProfile model schema for describing teas.
 - Seeding and ingestion pipeline for tea profiles utilizing SQLAlchemy ORM, Pandas, and PostgreSQL.
@@ -18,28 +18,31 @@
 - Linting with Ruff.
 - 100% testing coverage with Pytest.
 
-# Installation and Setup
+## Installation and Setup
 
 	git clone https://github.com/mroman48389/TeaTapestryBackend.git
 	Set-Location TeaTapestryBackend
 	pip install -r requirements.txt
 	
-# Testing
+## Testing
 
-> Currently done via SQLite databases along with mock tests to cover Postgres branches.
+> Currently done via SQLite databases along with mock tests to cover Postgres branching. 
 
-# Versioning
+	.\scripts\coverage.ps1
+	.\scripts\test.ps1
+
+## Versioning
 
 - **Major** (`v2`, `v3`, etc.): Breaking changes.
 - **Minor** (`v1.1`, `v1.2`, etc.): New features and minor updates.
 - **Patch** (`v1.0.1`, `v1.0.2`, etc.): Bug fixes.
 
-# Upgrade Instructions
+## Upgrade Instructions
 
 - Clients using `/api/v1/` will remain supported until deprecated.
 - To upgrade, switch your base URL to `/api/v2/`, and review the changelog below.
 
-# Changelog
+## Changelog
 
 > **v1.0.0**
 > - Initial release.
