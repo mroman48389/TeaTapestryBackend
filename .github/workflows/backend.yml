@@ -59,7 +59,7 @@ jobs:
             # --cov-report=term-missing shows lines not covered by tests,
             # PYTHONPATH: . ensures "from app.main import app" works in CI
             - name: Run tests with coverage
-              run: pytest --cov=app --cov-report=term-missing --cov-report=xml
+              run: pytest --cov=src --cov-report=term-missing --cov-report=xml
               env:
                   PYTHONPATH: .
 
