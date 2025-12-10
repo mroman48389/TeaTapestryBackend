@@ -1,15 +1,25 @@
+from fastapi.testclient import TestClient
 import pytest
 import csv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 # import tracemalloc
 
+from src.app.main import app
 from src.db.base import Base
 from src.utils.model_utils import get_model_column_names
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 
 # Report leaks (slow)
 # tracemalloc.start()
+
+# FastAPI provides the TestClient helper for simulating HTTP requests without
+# running a server. It's like a mock browser. Define it here, since we'll be using it
+# in our route tests.
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
 
 # Functions decorated with @pytest.fixture are 
 # automatically available to all tests in the same folder and

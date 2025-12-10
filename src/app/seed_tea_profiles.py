@@ -2,8 +2,8 @@
 
 import csv
 
-from src.db.models.tea_profiles_model import TeaProfile
-from src.utils.session_utils import get_session
+from src.db.models.tea_profiles_model import TeaProfileModel
+from src.utils.session_utils import get_session_cm
 from src.utils.csv_utils import parse_array, parse_numeric
 
 # SQL Equivalent:
@@ -50,7 +50,7 @@ def seed_tea_profiles(session, csv_file_path):
     #
     # SQL: SELECT COUNT(*) FROM tea_profiles;
 
-    if session.query(TeaProfile).count() == 0:
+    if session.query(TeaProfileModel).count() == 0:
 
         # with is a context manager. Behind the scenes, it's doing the
         # following:
@@ -65,7 +65,7 @@ def seed_tea_profiles(session, csv_file_path):
             reader = csv.DictReader(csvfile)
 
             for row in reader:
-                tea_profile = TeaProfile(
+                tea_profile = TeaProfileModel(
                     name = row['name'],
                     alternative_names = parse_array(row['alternative_names']),
                     tea_type = row['tea_type'],
@@ -130,7 +130,7 @@ def seed_tea_profiles(session, csv_file_path):
 # when the file is imported as a module, __name__ is set to
 # the file name.
 if __name__ == "__main__":
-    with get_session() as session:
+    with get_session_cm() as session:
         seed_tea_profiles(
             session,
             "data/seeds/tea_profiles_2025-11-12.csv"

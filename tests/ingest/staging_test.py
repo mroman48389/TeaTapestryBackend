@@ -4,7 +4,7 @@ import pandas as pd
 
 from src.ingest.staging import create_staging_table
 from src.ingest.staging import insert_into_staging
-from src.db.models.tea_profiles_model import TeaProfile
+from src.db.models.tea_profiles_model import TeaProfileModel
 
 def test_create_staging_table_postgres(monkeypatch):
     executed = {}
@@ -53,7 +53,7 @@ def test_insert_into_staging_postgres(monkeypatch):
     # Calls to df.to_sql will now use the mock to_sql.
     monkeypatch.setattr(pd.DataFrame, "to_sql", mock_to_sql)
 
-    insert_into_staging(df, "tea_profiles_staging", TeaProfile, engine)
+    insert_into_staging(df, "tea_profiles_staging", TeaProfileModel, engine)
 
     # Assert schema was added for PostgreSQL.
     assert captured["schema"] == "staging"

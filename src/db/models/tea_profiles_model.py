@@ -2,13 +2,20 @@ from sqlalchemy import Column, Integer, String, Numeric, Text
 
 from src.db.base import Base
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
-from src.constants.tea_profiles_constants import TeaProfileFields, REQUIRED_TEA_PROFILE_FIELDS
-from src.constants.model_metadata_constants import DELIMITER_INFO_DICT, IS_PRICE_INFO_DICT
+from src.constants.tea_profiles_constants import (
+    TeaProfileModelFields, REQUIRED_TEA_PROFILE_MODEL_FIELDS
+)
+from src.constants.model_metadata_constants import (
+    DELIMITER_INFO_DICT, IS_PRICE_INFO_DICT
+)
+
 
 def is_nullable(field: str) -> bool:
-    return field not in REQUIRED_TEA_PROFILE_FIELDS   
+    return field not in REQUIRED_TEA_PROFILE_MODEL_FIELDS   
 
-class TeaProfile(Base):
+
+# SQLAlchemy blueprint for database table. This schema defines how data is stored in the database.
+class TeaProfileModel(Base):
     # SQLAlchemy needs this dunder to be called tablename to do its mapping.
     __tablename__ = "tea_profiles"
 
@@ -21,117 +28,117 @@ class TeaProfile(Base):
     # safeguar.
     name = Column(
         String, 
-        nullable = is_nullable(TeaProfileFields.NAME),
+        nullable = is_nullable(TeaProfileModelFields.NAME),
         unique = True
     )
 
     # ex: Dragon Well is Longjing, Lung Ching as well.
     alternative_names = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.ALTERNATIVE_NAMES),
+        nullable = is_nullable(TeaProfileModelFields.ALTERNATIVE_NAMES),
         info = DELIMITER_INFO_DICT
     )
 
     # green, white, yellow, oolong, black/red, dark (pu-erh), non-camellia
     # sinensis (herbal, rooibos, yerba mate, tulsi, chai, camellia taliensis)
-    tea_type = Column(String, nullable=is_nullable(TeaProfileFields.TEA_TYPE))
+    tea_type = Column(String, nullable=is_nullable(TeaProfileModelFields.TEA_TYPE))
 
     # ex: Qunti Zhong, Longjing #43 for Dragon Well
     cultivars = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.CULTIVARS),
+        nullable = is_nullable(TeaProfileModelFields.CULTIVARS),
         info = DELIMITER_INFO_DICT
     )
 
     # pan-fired, steamed, scented/flavored, etc,
-    processing = Column(Text, nullable = is_nullable(TeaProfileFields.PROCESSING))
+    processing = Column(Text, nullable = is_nullable(TeaProfileModelFields.PROCESSING))
 
     # ex: Dragonwell is very low (typically 0%)
-    oxidation_level = Column(String, nullable = is_nullable(TeaProfileFields.OXIDATION_LEVEL))
+    oxidation_level = Column(String, nullable = is_nullable(TeaProfileModelFields.OXIDATION_LEVEL))
 
     # top 10 famous Chinese tea? geographically protected? story behind name,
     # etc.
     cultural_significance = Column(
         Text, 
-        nullable = is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE)
+        nullable = is_nullable(TeaProfileModelFields.CULTURAL_SIGNIFICANCE)
     )
 
     cultural_significance_source = Column(
         String, 
-        nullable = is_nullable(TeaProfileFields.CULTURAL_SIGNIFICANCE_SOURCE)
+        nullable = is_nullable(TeaProfileModelFields.CULTURAL_SIGNIFICANCE_SOURCE)
     )
 
     # ex: China
     country_of_origin = Column(
         String,
-        nullable = is_nullable(TeaProfileFields.COUNTRY_OF_ORIGIN)
+        nullable = is_nullable(TeaProfileModelFields.COUNTRY_OF_ORIGIN)
     )
     
     # As much info as available, such as Hangzhou (city), Zhejiang (province)
     # for Dragon Well
     subregions = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.SUBREGIONS),
+        nullable = is_nullable(TeaProfileModelFields.SUBREGIONS),
         info = DELIMITER_INFO_DICT
     )
     # not sure how to get this information easily yet
     avg_price_per_oz_usd = Column(
         Numeric(7, 2),
-        nullable = is_nullable(TeaProfileFields.AVG_PRICE_PER_OZ_USD),
+        nullable = is_nullable(TeaProfileModelFields.AVG_PRICE_PER_OZ_USD),
         info = IS_PRICE_INFO_DICT
     )
 
     liquor_appearance = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.LIQUOR_APPEARANCE),
+        nullable = is_nullable(TeaProfileModelFields.LIQUOR_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
 
     liquor_aroma = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.LIQUOR_AROMA),
+        nullable = is_nullable(TeaProfileModelFields.LIQUOR_AROMA),
         info  =DELIMITER_INFO_DICT
     )
     # includes aftertaste, hui gan, etc,
     liquor_taste = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.LIQUOR_TASTE),
+        nullable = is_nullable(TeaProfileModelFields.LIQUOR_TASTE),
         info = DELIMITER_INFO_DICT
     )
 
     # includes astringency, etc,
     liquor_body_mouthfeel = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.LIQUOR_BODY_MOUTHFEEL),
+        nullable = is_nullable(TeaProfileModelFields.LIQUOR_BODY_MOUTHFEEL),
         info = DELIMITER_INFO_DICT
     )
     # calming, mouth-watering, alert, astringent, etc.
     body_effect = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.BODY_EFFECT),
+        nullable = is_nullable(TeaProfileModelFields.BODY_EFFECT),
         info = DELIMITER_INFO_DICT
     )
 
     # flat, curled, rolled, different color shades, relative leaf size, etc.
     dry_leaf_appearance = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.DRY_LEAF_APPEARANCE),
+        nullable = is_nullable(TeaProfileModelFields.DRY_LEAF_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
     dry_leaf_aroma = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.DRY_LEAF_AROMA),
+        nullable = is_nullable(TeaProfileModelFields.DRY_LEAF_AROMA),
         info = DELIMITER_INFO_DICT
     )
 
     wet_leaf_appearance = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.WET_LEAF_APPEARANCE),
+        nullable = is_nullable(TeaProfileModelFields.WET_LEAF_APPEARANCE),
         info = DELIMITER_INFO_DICT
     )
     wet_leaf_aroma = Column(
         SQLiteCompatibleArray(),
-        nullable = is_nullable(TeaProfileFields.WET_LEAF_AROMA),
+        nullable = is_nullable(TeaProfileModelFields.WET_LEAF_AROMA),
         info = DELIMITER_INFO_DICT
     )
 

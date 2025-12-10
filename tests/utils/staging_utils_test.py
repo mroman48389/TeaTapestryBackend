@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from src.utils.staging_utils import get_staging_table_name
 
 @pytest.mark.parametrize(
-    "dialect,expected,raises",
+    "dialect, expected, raises",
     [
         ("postgresql", "staging.test_table_staging", None),
         ("sqlite", "test_table_staging", None),

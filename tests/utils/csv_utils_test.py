@@ -1,12 +1,11 @@
 import pytest
 
-from sqlalchemy import Column, Integer, String, Table, MetaData
-from sqlalchemy.dialects.postgresql import ARRAY
-
 from src.utils.csv_utils import (
     parse_array, parse_numeric, parse_string, load_and_clean_csv
 )
 from src.constants.model_metadata_constants import DELIMITER_VALUE
+from tests.types.test_types import FakeModel
+
 
 @pytest.mark.parametrize(
     "value, delimiter, expected",
@@ -52,15 +51,6 @@ def test_parse_numeric(value, expected):
 def test_parse_string(value, expected):
     assert parse_string(value) == expected
 
-
-class FakeModel:
-    __table__ = \
-        Table(
-            "test_table",
-            MetaData(),
-            Column("id", Integer, primary_key = True),
-            Column("tags", ARRAY(String)), 
-        )
 
 @pytest.mark.parametrize("csv_data", [
     'id,tags\n1,"a,b,c"\n2,"x,y,z"\n'

@@ -1,6 +1,6 @@
 from sqlalchemy import String, Numeric, Text, ARRAY
 
-from src.db.models.tea_profiles_model import TeaProfile, TeaProfileFields
+from src.db.models.tea_profiles_model import TeaProfileModel, TeaProfileModelFields
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 
 def init_sample_tea_profiles_row(overrides: dict[str, str | list[str]]) -> dict[str, 
@@ -8,9 +8,9 @@ def init_sample_tea_profiles_row(overrides: dict[str, str | list[str]]) -> dict[
     
     row = {}
 
-    for col in TeaProfile.__table__.columns:
+    for col in TeaProfileModel.__table__.columns:
         # skip primary key
-        if col.name == TeaProfileFields.ID:
+        if col.name == TeaProfileModelFields.ID:
             continue  
 
         # This allows us to pass in a dict with any key-value pairs
@@ -56,13 +56,13 @@ def get_sample_tea_profiles_data() -> dict[str, str | list[str] | None]:
     ]
 
     critical_row_values = {
-        TeaProfileFields.NAME: name,
-        TeaProfileFields.TEA_TYPE: tea_type,
-        TeaProfileFields.CULTIVARS: cultivars,
-        TeaProfileFields.COUNTRY_OF_ORIGIN: country_of_origin,
-        TeaProfileFields.LIQUOR_APPEARANCE: liquor_appearance,
-        TeaProfileFields.LIQUOR_AROMA: liquor_aroma,
-        TeaProfileFields.LIQUOR_TASTE: liquor_taste,
+        TeaProfileModelFields.NAME: name,
+        TeaProfileModelFields.TEA_TYPE: tea_type,
+        TeaProfileModelFields.CULTIVARS: cultivars,
+        TeaProfileModelFields.COUNTRY_OF_ORIGIN: country_of_origin,
+        TeaProfileModelFields.LIQUOR_APPEARANCE: liquor_appearance,
+        TeaProfileModelFields.LIQUOR_AROMA: liquor_aroma,
+        TeaProfileModelFields.LIQUOR_TASTE: liquor_taste,
     }
 
     return init_sample_tea_profiles_row(critical_row_values)

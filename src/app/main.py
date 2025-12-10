@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.db.base import Base, engine
+from src.api.routers.tea_profiles_router import router as tea_profiles_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +33,11 @@ app.add_middleware(
     allow_methods = ["*"],
     allow_headers = ["*"],
 )
+
+# Register routes to pick them up with testing.
+app.include_router(tea_profiles_router)
+
+# Simple, inline routes.
 
 # Define GET endpoint, telling FastAPI to respond to HTTP GET requests at the
 # root URL. async "root" function allows us to handle concurrent requests

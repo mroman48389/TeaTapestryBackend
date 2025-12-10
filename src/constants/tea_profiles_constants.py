@@ -1,4 +1,4 @@
-class TeaProfileFields:
+class TeaProfileModelFields:
     ID = "id"
 
     NAME = "name"
@@ -27,13 +27,13 @@ class TeaProfileFields:
     WET_LEAF_AROMA = "wet_leaf_aroma"
 
 
-REQUIRED_TEA_PROFILE_FIELDS = [
-    TeaProfileFields.ID,
-    TeaProfileFields.NAME,
-    TeaProfileFields.TEA_TYPE,
-    TeaProfileFields.CULTIVARS,
-    TeaProfileFields.COUNTRY_OF_ORIGIN,
-    TeaProfileFields.LIQUOR_APPEARANCE,
-    TeaProfileFields.LIQUOR_AROMA,
-    TeaProfileFields.LIQUOR_TASTE,
+REQUIRED_TEA_PROFILE_MODEL_FIELDS = [
+    TeaProfileModelFields.ID,
+    TeaProfileModelFields.NAME,
+    TeaProfileModelFields.TEA_TYPE,
+    TeaProfileModelFields.CULTIVARS,
+    TeaProfileModelFields.COUNTRY_OF_ORIGIN,
+    TeaProfileModelFields.LIQUOR_APPEARANCE,
+    TeaProfileModelFields.LIQUOR_AROMA,
+    TeaProfileModelFields.LIQUOR_TASTE,
 ]
