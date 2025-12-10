@@ -13,14 +13,16 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '706ea5a4e4f3'
-down_revision: Union[str, Sequence[str], None] = None #Union[str, Sequence[str], None] = 'ed74601e8937'
+down_revision: Union[str, Sequence[str], None] = None 
+#down_revision: Union[str, Sequence[str], None] = 'ed74601e8937'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# Did alembic revision --autogenerate -m "create tea_profiles table" to create this. Had to
-# swap code in upgrade() and downgrade(). Also had to change the down revision above, since this
-# is the first migration (it should be None.) and then go to the "...add_unique_contraint_on_tea..."
-# migration, change the down_revision to "706ea5a4e4f3", since it would go down to this revision
+# Did alembic revision --autogenerate -m "create tea_profiles table" to create this. 
+# Had to swap code in upgrade() and downgrade(). Also had to change the 
+# down revision above, since this is the first migration (it should be None.) and then 
+# go to the "...add_unique_contraint_on_tea...." migration, change the 
+# down_revision to "706ea5a4e4f3", since it would go down to this revision
 # (the first migration).
 
 
@@ -30,27 +32,44 @@ def upgrade() -> None:
     op.create_table('tea_profiles',
     sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('name', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('alternative_names', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
+    sa.Column('alternative_names', postgresql.ARRAY(sa.VARCHAR()), 
+        autoincrement=False, nullable=True),
     sa.Column('tea_type', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('cultivars', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=False),
+    sa.Column('cultivars', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=False),
     sa.Column('processing', sa.TEXT(), autoincrement=False, nullable=True),
     sa.Column('oxidation_level', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('cultural_significance', sa.TEXT(), autoincrement=False, nullable=True),
-    sa.Column('cultural_significance_source', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('country_of_origin', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('subregions', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('avg_price_per_oz_usd', sa.NUMERIC(precision=7, scale=2), autoincrement=False, nullable=True),
-    sa.Column('liquor_appearance', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=False),
-    sa.Column('liquor_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=False),
-    sa.Column('liquor_taste', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=False),
-    sa.Column('liquor_body_mouthfeel', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('body_effect', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('dry_leaf_appearance', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('dry_leaf_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('wet_leaf_appearance', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
-    sa.Column('wet_leaf_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True),
+    sa.Column('cultural_significance', sa.TEXT(), autoincrement=False, 
+        nullable=True),
+    sa.Column('cultural_significance_source', sa.VARCHAR(), autoincrement=False, 
+        nullable=True),
+    sa.Column('country_of_origin', sa.VARCHAR(), autoincrement=False, 
+        nullable=False),
+    sa.Column('subregions', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=True),
+    sa.Column('avg_price_per_oz_usd', sa.NUMERIC(precision=7, scale=2), 
+        autoincrement=False, nullable=True),
+    sa.Column('liquor_appearance', postgresql.ARRAY(sa.VARCHAR()), 
+        autoincrement=False, nullable=False),
+    sa.Column('liquor_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=False),
+    sa.Column('liquor_taste', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=False),
+    sa.Column('liquor_body_mouthfeel', postgresql.ARRAY(sa.VARCHAR()), 
+        autoincrement=False, nullable=True),
+    sa.Column('body_effect', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=True),
+    sa.Column('dry_leaf_appearance', postgresql.ARRAY(sa.VARCHAR()), 
+        autoincrement=False, nullable=True),
+    sa.Column('dry_leaf_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=True),
+    sa.Column('wet_leaf_appearance', postgresql.ARRAY(sa.VARCHAR()), 
+        autoincrement=False, nullable=True),
+    sa.Column('wet_leaf_aroma', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, 
+        nullable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('tea_profiles_pkey')),
-    sa.UniqueConstraint('name', name=op.f('tea_profiles_name_key'), postgresql_include=[], postgresql_nulls_not_distinct=False)
+    sa.UniqueConstraint('name', name=op.f('tea_profiles_name_key'), 
+        postgresql_include=[], postgresql_nulls_not_distinct=False)
     )
     # ### end Alembic commands ###
 
