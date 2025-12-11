@@ -85,6 +85,19 @@ jobs:
             - name: Ingest tea_profiles data
               run: python -m src.app.ingest_tea_profiles
 
+            - name: Debug DB contents
+              run: |
+                python - <<'EOF'
+                from src.utils.session_utils import get_session_cm
+                from src.db.models.tea_profiles_model import TeaProfileModel
+
+                with get_session_cm() as session:
+                    rows = session.query(TeaProfileModel).all()
+                    print(f"Found {len(rows)} tea profiles")
+                    for row in rows:
+                        print(row.id, row.name)
+                EOF
+
             # pytest --cov=app runs tests and coverage, 
             # --cov-report=term-missing shows lines not covered by tests,
             # PYTHONPATH: . ensures "from app.main import app" works in CI
