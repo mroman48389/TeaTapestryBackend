@@ -21,6 +21,6 @@ if __name__ == "__main__":
                 field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
                 if field != TeaProfileModelFields.ID
             ],
-            ["name"]
+            [TeaProfileModelFields.NAME]
         )
     print("tea_profiles ingestion complete")

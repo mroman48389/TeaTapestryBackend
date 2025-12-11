@@ -25,7 +25,7 @@ def test_ingest_data(create_test_db, create_test_csv):
             field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
             if field != TeaProfileModelFields.ID
         ], 
-        ["name"]
+        [TeaProfileModelFields.NAME]
     )
 
     # To run just this test:
@@ -92,7 +92,7 @@ def test_ingest_data_failure(monkeypatch, create_test_db, create_test_csv):
             field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
             if field != TeaProfileModelFields.ID
         ], 
-        ["name"]
+        [TeaProfileModelFields.NAME]
     )
 
     # After rollback, the table should be empty.

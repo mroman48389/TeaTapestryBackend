@@ -50,12 +50,12 @@ def create_staging_table(session, base_table: str):
     session.commit()
 
 def insert_into_staging(df, table_name: str, model, engine):
-    # Ensure DataFrame has all model columns. When 
+    # Ensure DataFrame has all model columns (minus the primary key). When 
     # SQLite is used, it clones the schema of tea_profiles
     # in create_staging_table, including the id column. This
     # won't affect PostgreSQL, which will automatically
     # generate the id.
-    cols = [col.name for col in model.__table__.columns]
+    cols = [col.name for col in model.__table__.columns if not col.primary_key]
 
     for col in cols:
         if col not in df.columns:

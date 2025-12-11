@@ -47,7 +47,7 @@ def parse_string(value: str | None) -> Optional[str]:
     # Otherwise, return None
     return None
 
-def load_and_clean_csv(csv_path: str, model, required_fields, 
+def load_and_clean_csv(csv_path: str, model, required_fields,
     conflict_cols: list[str], delimiter: str = DELIMITER_VALUE) -> pd.DataFrame:
     
     # print("Raw CSV DataFrame before cleaning:")
@@ -68,6 +68,14 @@ def load_and_clean_csv(csv_path: str, model, required_fields,
 
     # Drop any columns that do not exist in the model.
     df = df[get_model_column_names(model, False)]
+
+    # print("Columns before drop:", df.columns)
+
+    # # Drop auto-generated cols. (get_model_column_names with False does this)
+    # auto_cols = [col.name for col in model.__table__.columns if col.primary_key]
+    # for col in auto_cols:
+    #     if col in df.columns:
+    #         df = df.drop(columns=[col])
 
     # Strip whitespace from all non-numeric values. col.dtype == "object"
     # checks that the col Series (which represents one column) is a
