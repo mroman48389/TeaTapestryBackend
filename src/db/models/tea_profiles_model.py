@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Text
+from sqlalchemy import Integer, String, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -53,7 +53,9 @@ class TeaProfileModel(Base):
     # green, white, yellow, oolong, black/red, dark (pu-erh), non-camellia
     # sinensis (herbal, rooibos, yerba mate, tulsi, chai, camellia taliensis)
     # tea_type = Column(String, nullable=is_nullable(TeaProfileModelFields.TEA_TYPE))
-    tea_type: Mapped[str] = mapped_column(String, nullable=is_nullable(TeaProfileModelFields.TEA_TYPE))
+    tea_type: Mapped[str] = mapped_column(
+        String, nullable=is_nullable(TeaProfileModelFields.TEA_TYPE)
+    )
 
     # ex: Qunti Zhong, Longjing #43 for Dragon Well
     # cultivars = Column(
@@ -69,11 +71,17 @@ class TeaProfileModel(Base):
 
     # pan-fired, steamed, scented/flavored, etc,
     # processing = Column(Text, nullable = is_nullable(TeaProfileModelFields.PROCESSING))
-    processing: Mapped[str] = mapped_column(Text, nullable = is_nullable(TeaProfileModelFields.PROCESSING))
+    processing: Mapped[str] = mapped_column(
+        Text, nullable = is_nullable(TeaProfileModelFields.PROCESSING)
+    )
 
     # ex: Dragonwell is very low (typically 0%)
-    # oxidation_level = Column(String, nullable = is_nullable(TeaProfileModelFields.OXIDATION_LEVEL))
-    oxidation_level: Mapped[str] = mapped_column(String, nullable = is_nullable(TeaProfileModelFields.OXIDATION_LEVEL))
+    # oxidation_level = Column(
+    #     String, nullable = is_nullable(TeaProfileModelFields.OXIDATION_LEVEL)
+    #)
+    oxidation_level: Mapped[str] = mapped_column(
+        String, nullable = is_nullable(TeaProfileModelFields.OXIDATION_LEVEL)
+    )
 
     # top 10 famous Chinese tea? geographically protected? story behind name,
     # etc.
