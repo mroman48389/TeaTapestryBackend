@@ -1,5 +1,6 @@
 from typing import Optional
 import pandas as pd
+import numpy as np
 from sqlalchemy import ARRAY, Numeric, Text, String
 
 from src.constants.model_metadata_constants import (
@@ -55,6 +56,9 @@ def load_and_clean_csv(csv_path: str, model, required_fields,
     # Load CSV into dataframe.
     df = pd.read_csv(csv_path)
 
+    # Normalize string "None", etc. to actual Python None
+    df = df.replace({"None": None, "null": None, "NULL": None})
+
     # Strip white space around column headings. inplace=True ->
     # modify existing dataframe, don't create a new one.
     df.rename(columns = lambda c: c.strip(), inplace = True)
@@ -106,6 +110,6 @@ def load_and_clean_csv(csv_path: str, model, required_fields,
     # This ensures that when the DataFrame is written to Postgres via SQLAlchemy,
     # those cells become proper SQL NULLs (the correct representation of "no data").
     # In pgAdmin, SQL NULLs appear as [null].
-    df = df.where(pd.notnull(df), None)
+    df = df.where(pd.notnull(df), None) # type: ignore
 
     return df
