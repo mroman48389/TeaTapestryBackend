@@ -21,22 +21,28 @@ def test_get_tea_profiles(client):
         assert tea_profile[TeaProfileModelFields.TEA_TYPE] == "green"
         assert tea_profile[TeaProfileModelFields.COUNTRY_OF_ORIGIN] == "China"
 
-# get_id_from_tea_name --> normal case; integer for existing tea profile. 
-#                          Note that we can't use hardcoded examples because our
+# "long jing id"       --> normal case; integer for existing tea profile. 
+#                          Note that we can't use hardcoded ids because our
 #                          ids may differ for the same tea in our actual and 
-#                          testing databases.
+#                          testing databases. So we use a fixture that grabs the
+#                          id after we know ingestion has happened and a placeholder
+#                          in the parametrization.
 # 1                    --> tea profile id does not exist
 # "abc"                --> FastAPI will try to convert to int and not be able to; 
 #                          breaks contract
 @pytest.mark.parametrize(
     "id, expected_status",
     [
-        (get_id_from_tea_name("Long Jing"), status.HTTP_200_OK),   
+        ("long jing id", status.HTTP_200_OK),   
         (1, status.HTTP_404_NOT_FOUND),    
         ("abc", status.HTTP_422_UNPROCESSABLE_CONTENT),    
     ]
 )
-def test_get_tea_profile(client, id, expected_status):
+def test_get_tea_profile(client, long_jing_tea_profile_id, id, expected_status):
+    # Replace placeholder with fixture value
+    if id == "long jing id":
+        id = long_jing_tea_profile_id
+
     response = client.get(f"/api/v1/tea_profiles/{id}")
     assert response.status_code == expected_status
 
