@@ -80,10 +80,10 @@ jobs:
               run: alembic upgrade head
 
             - name: Seed tea_profiles database
-              run: python -m src.seed.seed_tea_profiles
+              run: python -m src.app.seed_tea_profiles
 
             - name: Ingest tea_profiles data
-              run: python -m src.ingest.ingest_tea_profiles
+              run: python -m src.app.ingest_tea_profiles
 
             # pytest --cov=app runs tests and coverage, 
             # --cov-report=term-missing shows lines not covered by tests,
