@@ -15,7 +15,7 @@ if __name__ == "__main__":
     with get_session_cm() as session:
         ingest_data(
             session,
-            "data/ingestion/tea_profiles_2025-11-17.csv",
+            "data/ingestion/tea_profiles_ingestion_testing.csv",
             TeaProfileModel,
             [
                 field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
