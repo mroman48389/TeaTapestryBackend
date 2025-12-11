@@ -20,10 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 # Did alembic revision --autogenerate -m "create tea_profiles table" to create this. 
 # Had to swap code in upgrade() and downgrade(). Also had to change the 
-# down revision above, since this is the first migration (it should be None.) and then 
-# go to the "...add_unique_contraint_on_tea...." migration, change the 
-# down_revision to "706ea5a4e4f3", since it would go down to this revision
-# (the first migration).
+# down revision above, since this is the first migration (it should be None.).
 
 
 def upgrade() -> None:
