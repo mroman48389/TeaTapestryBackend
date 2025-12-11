@@ -3,6 +3,7 @@ from starlette import status
 
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema
 from src.constants.tea_profiles_constants import TeaProfileModelFields
+from tests.utils.test_utils import get_id_from_tea_name
 
 def test_get_tea_profiles(client):
     filters = {
@@ -20,15 +21,17 @@ def test_get_tea_profiles(client):
         assert tea_profile[TeaProfileModelFields.TEA_TYPE] == "green"
         assert tea_profile[TeaProfileModelFields.COUNTRY_OF_ORIGIN] == "China"
 
-# 37    --> normal case; integer for existing tea profile
-# "37"  --> works; FastAPI will auto convert to an int
-# 1     --> tea profile id does not exist
-# "abc" --> FastAPI will try to convert to int and not be able to; breaks contract
+# get_id_from_tea_name --> normal case; integer for existing tea profile. 
+#                          Note that we can't use hardcoded examples because our
+#                          ids may differ for the same tea in our actual and 
+#                          testing databases.
+# 1                    --> tea profile id does not exist
+# "abc"                --> FastAPI will try to convert to int and not be able to; 
+#                          breaks contract
 @pytest.mark.parametrize(
     "id, expected_status",
     [
-        (37, status.HTTP_200_OK),   
-        ("37", status.HTTP_200_OK),  
+        (get_id_from_tea_name("Long Jing"), status.HTTP_200_OK),   
         (1, status.HTTP_404_NOT_FOUND),    
         ("abc", status.HTTP_422_UNPROCESSABLE_CONTENT),    
     ]

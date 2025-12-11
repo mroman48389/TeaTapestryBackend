@@ -1,5 +1,8 @@
 from fastapi.routing import APIRoute
 
+from src.utils.session_utils import get_session_cm
+from src.db.models.tea_profiles_model import TeaProfileModel
+
 def get_dummy_value_for_param_type(param_type):
     """Return a dummy value based on the parameter type."""
     if param_type is int:
@@ -22,3 +25,10 @@ def get_path_with_dummy_params(route: APIRoute) -> str:
         val = get_dummy_value_for_param_type(param.type_)
         path = path.replace(f"{{{param.name}}}", val)
     return path
+
+def get_id_from_tea_name(name: str) -> int:
+    with get_session_cm() as session:
+        obj = session.query(TeaProfileModel).filter_by(name = name).first()
+        if not obj:
+            raise ValueError(f"No tea profile found with name = {name}")
+        return obj.id
