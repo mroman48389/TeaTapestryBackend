@@ -26,14 +26,16 @@ def test_get_tea_profiles(client):
 #                          testing databases. So we use a fixture that grabs the
 #                          id after we know ingestion has happened and a placeholder
 #                          in the parametrization.
-# 1                    --> tea profile id does not exist
+# -1                   --> tea profile id does not exist (PostgreSQL will never
+#                          autogenerate negative numbers, so this is a safe integer
+#                          test)
 # "abc"                --> FastAPI will try to convert to int and not be able to; 
 #                          breaks contract
 @pytest.mark.parametrize(
     "id, expected_status",
     [
         ("long jing id", status.HTTP_200_OK),   
-        (1, status.HTTP_404_NOT_FOUND),    
+        (-1, status.HTTP_404_NOT_FOUND),    
         ("abc", status.HTTP_422_UNPROCESSABLE_CONTENT),    
     ]
 )
