@@ -4,17 +4,28 @@ from sqlalchemy import text
 from src.db.models.tea_profiles_model import TeaProfileModel
 from src.ingest.ingest import ingest_data
 import src.ingest.ingest as ingest_module
+import src.ingest.staging as staging
 from src.constants.tea_profiles_constants import (
     REQUIRED_TEA_PROFILE_MODEL_FIELDS, TeaProfileModelFields
 )
 from src.utils.sample_data_utils import get_sample_tea_profiles_data
+from tests.utils.test_utils import make_df_sqlite_compatible
 
-def test_ingest_data(create_test_db, create_test_csv):
+def test_ingest_data(monkeypatch, create_test_db, create_test_csv):
     # Use create_test_csv fixture to create a CSV file with sample data
     # and return the path.
 
     sample_tea_profiles_data = get_sample_tea_profiles_data()
     csv_file = create_test_csv(TeaProfileModel, sample_tea_profiles_data)
+
+    original_insert_into_staging = staging.insert_into_staging
+
+    # Monkeypatch insert_into_staging to serialize lists for SQLite
+    def patched_insert_into_staging(df, *args, **kwargs):
+        df = make_df_sqlite_compatible(df, TeaProfileModel)
+        return original_insert_into_staging(df, *args, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "insert_into_staging", patched_insert_into_staging)
 
     # Ingest data from the test CSV.
     ingest_data(
@@ -32,7 +43,7 @@ def test_ingest_data(create_test_db, create_test_csv):
     #
     # $env:PYTHONPATH="C:\Proj\TeaTapestryBackend"
     # >> pytest tests\ingest\ingest_test.py::test_ingest_data -s
-    #
+    
     # print(
     #     "Rows in staging:",
     #     create_test_db.execute(text("SELECT COUNT(*) FROM tea_profiles_staging")).scalar()
@@ -41,13 +52,14 @@ def test_ingest_data(create_test_db, create_test_csv):
     #     "Rows in base:",
     #     create_test_db.execute(text("SELECT COUNT(*) FROM tea_profiles")).scalar()
     # )
-    #
+    
     # insp = inspect(create_test_db.bind)
     # print("Tables in DB:", insp.get_table_names())
     # print("Columns in tea_profiles_staging:", insp.get_columns("tea_profiles_staging"))
     # print("Columns in tea_profiles:", insp.get_columns("tea_profiles"))
     # with open(csv_file) as f:
     #     print("CSV contents:\n", f.read())
+
     # rows = list(create_test_db.execute(text("SELECT * FROM tea_profiles_staging")))
     # print("Staging rows:", rows)
 

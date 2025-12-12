@@ -85,8 +85,20 @@ def create_test_csv(tmp_path):
         sample_data = sample_data or {}
 
         # SQLite doesn't have true arrays, so we must serialize into strings.
-        row = {col: DELIMITER_VALUE.join(val) if isinstance(val, list) else val
-            for col, val in sample_data.items()}
+        # row = {col: DELIMITER_VALUE.join(val) if isinstance(val, list) else val
+        #     for col, val in sample_data.items()}
+        row = {}
+        for col in model_col_names:
+            # Get the value for the key "col", returning "" if the key does not exist
+            # in the sample data dict.
+            val = sample_data.get(col, "")
+
+            # If the value is a list, serialize into a string.
+            if isinstance(val, list):
+                row[col] = DELIMITER_VALUE.join(val)
+            # Otherwise, use the value as-is.
+            else:
+                row[col] = val
 
         # Write with proper quoting
         with open(csv_file, "w", newline="", encoding="utf-8") as f:

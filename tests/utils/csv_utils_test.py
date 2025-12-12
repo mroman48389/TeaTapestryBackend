@@ -52,10 +52,12 @@ def test_parse_string(value, expected):
     assert parse_string(value) == expected
 
 
-@pytest.mark.parametrize("csv_data", [
-    'id,tags\n1,"a,b,c"\n2,"x,y,z"\n'
+@pytest.mark.parametrize("csv_data, expected_active", [
+    ('id, tags, active \n 1, a; b; c, false \n 2, x; y; z, true \n', [False, True]),
+    ('id, tags, active \n 1, a; b; c, 0 \n 2, x; y; z, 1 \n', [False, True]),
+    ('id, tags, active \n 1, a; b; c, f \n 2, x; y; z, t \n', [False, True])
 ])
-def test_load_and_clean_csv_array(tmp_path, csv_data):
+def test_load_and_clean_csv_arrays_booleans(tmp_path, csv_data, expected_active):
     # Write CSV to temp file
     csv_path = tmp_path / "test.csv"
     csv_path.write_text(csv_data)
@@ -63,7 +65,7 @@ def test_load_and_clean_csv_array(tmp_path, csv_data):
     df = load_and_clean_csv(
         csv_path = str(csv_path),
         model = FakeModel,
-        required_fields = ["tags"],
+        required_fields = ["tags", "active"],
         conflict_cols = ["tags"]
     )
 
@@ -72,4 +74,5 @@ def test_load_and_clean_csv_array(tmp_path, csv_data):
     # column names are not part of the row indexing and the first row of data
     # starts at row 0.
     assert isinstance(df.loc[0, "tags"], list)
-    assert df.loc[0, "tags"] == ["a,b,c"]
+    assert df.loc[0, "tags"] == ["a", "b", "c"]
+    assert list(df["active"]) == expected_active

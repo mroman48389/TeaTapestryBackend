@@ -3,7 +3,6 @@ from starlette import status
 
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema
 from src.constants.tea_profiles_constants import TeaProfileModelFields
-from tests.utils.test_utils import get_id_from_tea_name
 
 def test_get_tea_profiles(client):
     filters = {

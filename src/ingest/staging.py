@@ -50,6 +50,9 @@ def create_staging_table(session, base_table: str):
     session.commit()
 
 def insert_into_staging(df, table_name: str, model, engine):
+    
+    # Schema alignment
+
     # Ensure DataFrame has all model columns (minus the primary key). When 
     # SQLite is used, it clones the schema of tea_profiles
     # in create_staging_table, including the id column. This
@@ -57,18 +60,9 @@ def insert_into_staging(df, table_name: str, model, engine):
     # generate the id.
     cols = [col.name for col in model.__table__.columns if not col.primary_key]
 
-    for col in cols:
-        if col not in df.columns:
-            df[col] = None
-
     # reorder to match table schema
     df = df[cols]  
-
-    # Explicitly cast to string/numeric where needed
-    for col in df.columns:
-        if df[col].dtype == "object":
-            df[col] = df[col].astype(str)
-
+ 
     # Load Pandas DataFrame into staging table.
 
     # Push DataFrame rows into SQLAlchemy database.
