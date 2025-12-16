@@ -13,6 +13,7 @@ class SQLiteCompatibleArray(TypeDecorator):
     # By default, treat the value as Text. TypeDecorator requires a
     # base implementation type.
     impl = Text
+    cache_ok = True # tell SQLAlchemy this type can be used in query cache keys
 
     def load_dialect_impl(self, dialect):
         # Use Text for SQLite and ARRAY for PostgreSQL

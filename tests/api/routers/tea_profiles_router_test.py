@@ -7,7 +7,8 @@ from src.constants.tea_profiles_constants import TeaProfileModelFields
 def test_get_tea_profiles(client):
     filters = {
         TeaProfileModelFields.TEA_TYPE: "green",
-        TeaProfileModelFields.COUNTRY_OF_ORIGIN: "China"
+        TeaProfileModelFields.COUNTRY_OF_ORIGIN: "China",
+        TeaProfileModelFields.ALTERNATIVE_NAMES: "Dragonwell,Dragon Well"
     }
     response = client.get("/api/v1/tea_profiles", params = filters)
     assert response.status_code == status.HTTP_200_OK
@@ -17,8 +18,9 @@ def test_get_tea_profiles(client):
     for tea_profile in data:
         value = TeaProfileSchema.model_validate(tea_profile)
         assert isinstance(value, TeaProfileSchema)
-        assert tea_profile[TeaProfileModelFields.TEA_TYPE] == "green"
-        assert tea_profile[TeaProfileModelFields.COUNTRY_OF_ORIGIN] == "China"
+    assert tea_profile[TeaProfileModelFields.TEA_TYPE] == "green"
+    assert tea_profile[TeaProfileModelFields.COUNTRY_OF_ORIGIN] == "China"
+    assert tea_profile[TeaProfileModelFields.ALTERNATIVE_NAMES] == ["Dragonwell", "Dragon Well"]
 
 # "long jing id"       --> normal case; integer for existing tea profile. 
 #                          Note that we can't use hardcoded ids because our
@@ -55,7 +57,7 @@ def test_get_tea_profile(client, long_jing_tea_profile_id, id, expected_status):
         assert isinstance(tea_profile, TeaProfileSchema)
 
     elif expected_status == status.HTTP_404_NOT_FOUND:
-        assert data["detail"] == "A tea profile with the provided id was not found"
+        assert data["detail"] == "A tea profile with the provided id was not found."
 
     elif expected_status == status.HTTP_422_UNPROCESSABLE_CONTENT:
         assert data["detail"][0]["type"] == "int_parsing"
