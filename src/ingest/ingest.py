@@ -25,3 +25,10 @@ def ingest_data(session, csv_path: str, model, required_fields, conflict_cols: l
     except Exception as e:
         session.rollback()
         print(f"Ingestion failed: {e}")
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This module provides ingestion utilities and is not meant to be executed directly. "
+        "If you were attempting to ingest data, run the appropriate ingestion runner ",
+        "instead (Ex: src.app.ingest_tea_profiles to ingest tea_profiles data)."
+    )

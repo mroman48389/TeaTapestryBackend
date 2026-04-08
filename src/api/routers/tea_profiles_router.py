@@ -72,7 +72,7 @@ def get_tea_profile_filters(request: Request) -> TeaProfileFilters: # type: igno
 def get_tea_profiles(
     filters: TeaProfileFilters = Depends(get_tea_profile_filters), # type: ignore
     session: Session = Depends(get_session),
-    limit: int = 10,
+    limit: int = 100,
     offset: int = 0
 ):
     '''Gets a list of tea profiles with the provided filters.'''

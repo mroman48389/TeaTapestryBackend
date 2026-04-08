@@ -12,15 +12,20 @@ from src.db.models.tea_profiles_model import (
 # when the file is imported as a module, __name__ is set to
 # the file name.
 if __name__ == "__main__":
-    with get_session_cm() as session:
-        ingest_data(
-            session,
-            "data/ingestion/tea_profiles_ingestion_testing.csv",
-            TeaProfileModel,
-            [
-                field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
-                if field != TeaProfileModelFields.ID
-            ],
-            [TeaProfileModelFields.NAME]
-        )
-    print("tea_profiles ingestion complete")
+    try:
+        with get_session_cm() as session:
+            ingest_data(
+                session,
+                "data/ingestion/tea_profiles_ingestion_testing.csv",
+                TeaProfileModel,
+                [
+                    field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
+                    if field != TeaProfileModelFields.ID
+                ],
+                [TeaProfileModelFields.NAME]
+            )
+        print("tea_profiles ingestion complete")
+        
+    except Exception as e:
+        print("Ingestion failed: ", e)
+        raise
