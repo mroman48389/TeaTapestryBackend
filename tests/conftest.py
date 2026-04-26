@@ -1,4 +1,4 @@
-import os #changeA
+import os 
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 import pytest
@@ -9,29 +9,24 @@ from sqlalchemy.orm import sessionmaker
 
 from src.app.main import app
 from src.db.base import Base
-# SQLAlchemy only creates tables for models that have been imported into memory. #changeA
-from src.db.models.tea_profiles_model import TeaProfileModel  #changeA
+# SQLAlchemy only creates tables for models that have been imported into memory. 
+from src.db.models.tea_profiles_model import TeaProfileModel 
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 
-os.environ["PYTEST_RUNNING"] = "1" #changeA
+# Mark the process as a pytest run. The application checks this flag to skip 
+# production startup logicsuch as creating real database tables or connecting 
+# to external services.
+os.environ["PYTEST_RUNNING"] = "1"
 
 # Report leaks (slow)
 # tracemalloc.start()
 
-#changeA
-# FastAPI provides the TestClient helper for simulating HTTP requests without
-# running a server. It's like a mock browser. Define it here, since we'll be using it
-# in our route tests.
 @pytest.fixture
 def client(create_test_db):
-    # Override FastAPI's DB dependency so routes use the test DB
+    # Override FastAPI's DB dependency so routes use the test DB.
     def override_get_session():
-        print("DEBUG: USING TEST DB SESSION")
-        print("DEBUG: SESSION BIND:", create_test_db.bind)
-        print("DEBUG: OVERRIDE SESSION CONNECTION:", create_test_db.connection())
-        print("DEBUG: OVERRIDE ENGINE ID:", id(create_test_db.bind))
         try:
             yield create_test_db
         finally:
@@ -39,100 +34,61 @@ def client(create_test_db):
 
     app.dependency_overrides[get_session] = override_get_session
 
+    # FastAPI provides the TestClient helper for simulating HTTP requests without
+    # running a server. It's like a mock browser. Define it here, since we'll be using it
+    # in our route tests.
     with TestClient(app) as c:
         yield c
 
     # Clean up after test
     app.dependency_overrides.clear()
 
-#Old:
-# @pytest.fixture
-# def client():
-#     with TestClient(app) as c:
-#         yield c
-
 @pytest.fixture
 def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
     obj = create_test_db.query(TeaProfileModel).filter_by(name="Long Jing").first()
     return obj.id
 
-#Old
-# @pytest.fixture(scope = "session")
-# def long_jing_tea_profile_id():
-#     """Fetches the ID for Long Jing after ingestion has run."""
-#     return get_id_from_tea_name("Long Jing")
-
-@pytest.fixture(scope="function")
-def create_test_db():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool
-    )
-
-    # IMPORTANT: open a single shared connection
-    connection = engine.connect()
-
-    # Bind the metadata to this connection explicitly
-    Base.metadata.create_all(bind=connection)
-
-    # Create a sessionmaker bound to THIS connection
-    TestingSessionLocal = sessionmaker(bind=connection)
-
-    db = TestingSessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
-        connection.close()
-        engine.dispose()
-
-#Old changeA
 # Functions decorated with @pytest.fixture are 
 # automatically available to all tests in the same folder and
 # subfolders (no importing needed!) Fixtures can be scoped to
 # dictate when they're created and destroyed.  Scope can be function,
 # class, module, session, etc. Function means the method will be created
-# and destroyed for each test we define. This function runs each test 
-# in a sandbox, so our real DBs and CSVs are untouched.
-# @pytest.fixture(scope = "function")
-# def create_test_db():
-#     # Create a temporary, in-memory SQLite for isolation. 
-#     #changeA
-#     # engine = create_engine("sqlite:///:memory:")
-#     engine = create_engine(
-#         "sqlite:///:memory:?cache=shared",
-#         connect_args={"check_same_thread": False},
-#         poolclass=StaticPool
-#     )
-#     TestingSessionLocal = sessionmaker(bind=engine)
+# and destroyed for each test we define. 
+#
+# This fixture provides an isolated, in‑memory SQLite database for tests.
+# It ensures every test runs in a clean sandbox so no real database or files
+# are touched.
+@pytest.fixture(scope = "function")
+def create_test_db():
+    # Create an in‑memory SQLite engine. Using StaticPool + check_same_thread=False
+    # ensures all connections share the same in‑memory database.
+    engine = create_engine(
+        "sqlite://",
+        connect_args = {"check_same_thread": False},
+        poolclass = StaticPool
+    )
 
-#     # Build a table.
-#     Base.metadata.create_all(bind=engine)
+     # Open a single shared connection for the entire test.
+    connection = engine.connect()
 
-#     #changeA
-#     # DEBUG: what tables does SQLAlchemy think exist on this engine?
-#     with engine.connect() as conn:
-#         print("DEBUG: CREATE_TEST_DB CONNECTION:", conn)
-#     inspector = inspect(engine)
-#     print("DEBUG: TEST DB TABLES:", inspector.get_table_names())
-#     print("DEBUG: METADATA TABLES:", list(Base.metadata.tables.keys()))
-#     print("DEBUG: ENGINE POOL:", type(engine.pool))
-#     print("DEBUG: TEST ENGINE ID:", id(engine))
+    # Create all tables on this connection.
+    Base.metadata.create_all(bind = connection)
 
-#     # Open session.
-#     db = TestingSessionLocal()
+    # Create a sessionmaker bound to this shared connection.
+    TestingSessionLocal = sessionmaker(bind = connection)
 
-#     try:
-#         # Hand session to the test.
-#         yield db
+    # Open a session for the test.
+    db = TestingSessionLocal()
 
-#     finally:
-#         # Ensure resources are closed after each test.
-#         db.close()
-#         engine.dispose()
+    try:
+        # Hand session to the test.
+        yield db
 
+    finally:
+        # Ensure resources are cleaned up after each test.
+        db.close()
+        connection.close()
+        engine.dispose()
 
 @pytest.fixture
 # Note that while we can rename fixture functions, you CANNOT rename fixture

@@ -1,4 +1,4 @@
-import os #changeA
+import os 
 # Use FastAPI framework to get decorators like @app.get, routing, validation,
 # and docs.
 from fastapi import FastAPI
@@ -9,7 +9,8 @@ from src.db.base import Base
 from src.api.routers.tea_profiles_router import router as tea_profiles_router
 from src.api.error_handlers import register_exception_handlers
 
-IS_TEST = os.environ.get("PYTEST_RUNNING") == "1" #changeA
+# Check to see if we're doing testing (set in conftest.py) 
+IS_TEST = os.environ.get("PYTEST_RUNNING") == "1" #
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -17,8 +18,8 @@ async def lifespan(app: FastAPI):
 
     # Create tables for all models that inherit from Base
     # if they don't exist yet. Only needs to run once.
-    if not IS_TEST: #changeA
-        from src.db.engine import engine#changeA
+    if not IS_TEST: 
+        from src.db.engine import engine
         Base.metadata.create_all(bind = engine)
 
     # Tell FastAPI that startup is Continues startup

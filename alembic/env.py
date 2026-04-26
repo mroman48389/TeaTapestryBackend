@@ -1,15 +1,12 @@
 import sys
 import os 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))  # ensure project root is on path
-
-from src.db.base import DATABASE_URL, Base
 from sqlalchemy import create_engine
-
 from logging.config import fileConfig
-
 from sqlalchemy import pool
-
 from alembic import context
+
+from src.db.base import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -57,6 +54,13 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def get_url() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url is None:
+        raise RuntimeError("DATABASE_URL environment variable is not set.")
+    return url
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
@@ -70,7 +74,7 @@ def run_migrations_online() -> None:
     #     poolclass=pool.NullPool,
     # )
 
-    connectable = create_engine(DATABASE_URL, poolclass=pool.NullPool)
+    connectable = create_engine(get_url(), poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         context.configure(
