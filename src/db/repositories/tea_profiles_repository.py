@@ -61,8 +61,8 @@ class TeaProfilesRepository:
             # extracting it as ORM objects of type TeaProfileModel.
             query = self._session.query(TeaProfileModel)
 
-            # field_name will be something like "country_of_origin" and value will be something like "China".
-            # Each loop will further refine the query. 
+            # field_name will be something like "country_of_origin" and value 
+            # will be something like "China". Each loop will further refine the query. 
             for field_name, value in filters.items():
                 column = getattr(TeaProfileModel, field_name)
 
