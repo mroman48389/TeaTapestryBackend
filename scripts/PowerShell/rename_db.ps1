@@ -1,5 +1,4 @@
-# PowerShell: .\scripts\rename-db.ps1 -OldName "[old name]" -NewName "[new name]"
-# OR .\scripts\rename-db.ps1 -OldName (Read-Host "Old DB name") -NewName (Read-Host "New DB name")
+# PowerShell: .\scripts\PowerShell\rename-db.ps1 -OldName [old name] -NewName [new name]
 
 param (
     [string]$OldName = "teaprofiles",
@@ -28,8 +27,9 @@ if ($checkNew) {
 $renameResult = psql -U $User -h $Host -d postgres -c "ALTER DATABASE $OldName RENAME TO $NewName;"
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "Successfully renamed '$OldName' → '$NewName'"
-} else {
+    Write-Host "Successfully renamed '$OldName' to '$NewName'"
+} 
+else {
     Write-Host "Rename failed. Are you connected to '$OldName'? Disconnect and try again."
 }
 

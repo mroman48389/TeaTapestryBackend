@@ -1,6 +1,9 @@
 
 def get_sql_from_dialect(session, postgres_sql: str, sqlite_sql: str) -> str:
-    dialect = session.bind.dialect.name
+    # bind should never be None. Assert to make Pylance happy.
+    bind = session.bind
+    assert bind is not None  
+    dialect = bind.dialect.name
 
     if dialect == "postgresql":
         return postgres_sql

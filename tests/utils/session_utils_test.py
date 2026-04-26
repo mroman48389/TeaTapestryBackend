@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from src.utils.session_utils import get_session_cm, get_session
 
 def test_get_session_cm():
-
     with get_session_cm() as session:
         assert isinstance(session, Session)
 

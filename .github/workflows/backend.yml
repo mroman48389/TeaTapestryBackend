@@ -57,6 +57,10 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
+            # Fail as early as possible if we don't pass the security audit to avoid exposing secrets.
+            - name: Run backend security audit
+              run: node scripts/Node/security_audit.mjs
+
             # Install Python in virtual environment with version 4 of setup-python in GitHub Action.
             - name: Set up Python
               uses: actions/setup-python@v4

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
+/* Allow Node to run Shell commands synchronously. */
+import { execSync } from "child_process";
 
 const ROOT_DIR = process.cwd();
 
@@ -30,8 +32,6 @@ function getBackendDirs() {
             return fs.statSync(full_path).isDirectory() && !IGNORED_DIRS.has(name);
         });
 }
-
-const BACKEND_DIRS = getBackendDirs(ROOT_DIR);
 
 /* Patterns that often indicate secrets */
 const SUSPICIOUS_PATTERNS = [
@@ -129,9 +129,6 @@ function checkEnvFiles() {
 
 function isFileTracked(relPath) {
     try {
-        /* Allow Node to run Shell commands synchronously. */
-        const { execSync } = require("child_process");
-
         /* Run the "git ls-files" Shell command from the root directory and return the result as a string (UTF-8). It lists all 
            files that Git knows about (committed, staged, etc.). ignored or untracked files will not be listed. 
            
@@ -169,7 +166,7 @@ function scanBackendFiles() {
             [1, 2, 3].flatMap(n => [n, n * 2]) --> [1, 2, 2, 4, 3, 6]
 
     */
-    const filePaths = BACKEND_DIRS.flatMap((dir) => getFilesInDir(path.join(ROOT_DIR, dir), fileFilter));
+    const filePaths = getBackendDirs().flatMap((dir) => getFilesInDir(path.join(ROOT_DIR, dir), fileFilter));
 
     /* Array of objects, each containing a suspicious pattern and the file it is found in. */
     const findings = [];

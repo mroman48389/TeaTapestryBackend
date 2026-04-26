@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from typing import List, get_origin, get_args, Union
-from starlette import status
 
 from src.utils.session_utils import get_session
-from src.db.models.tea_profiles_model import TeaProfileModel
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
 from src.api.constants.responses import COMMON_RESPONSES
+from src.db.repositories.tea_profiles_repository import TeaProfilesRepository
 
 # Define group of routes with api/tea_profiles as their base path and tea_profiles
 # for documentation grouping.
@@ -75,42 +74,22 @@ def get_tea_profiles(
     limit: int = 100,
     offset: int = 0
 ):
-    '''Gets a list of tea profiles with the provided filters.'''
-    # Get a query object that will allow us to ask the database for data,
-    # extracting it as ORM objects of type TeaProfileModel.
-    query = session.query(TeaProfileModel)
-
+    repo = TeaProfilesRepository(session)
     # filters.model_dump(exclude_none = True) returns the Pydantic model as a
-    # dict, dropping all fields that have a value of None. field_name will be
-    # something like "country_of_origin" and value will be something like "China".
-    # Each loop will further refine the query. 
-    for field_name, value in filters.model_dump(exclude_none = True).items():
-        # getattr(TeaProfileModel, field_name) will grab the the column object.
-        # So, for example, TeaProfileModel.country_of_origin. 
-        query = query.filter(getattr(TeaProfileModel, field_name) == value)
-
-    # Return "limit" number of rows starting on row "offset" that satisfy the query.
-    teas_profiles = query.offset(offset).limit(limit).all()
-
-    # In raw SQL, our queries would look something like this:
+    # dict, dropping all fields that have a value of None. 
     #
-    #     SELECT * FROM tea_profiles
-    #     WHERE oxidation_level = 'green' AND country_of_origin = 'China'
-    #     LIMIT 10 OFFSET 0;
-
-    return teas_profiles
+    # TeaProfileFilters does not belong in TeaProfilesRepository (it's part of the API layer,
+    # as it's a Pydantic request schema), so save the dict returned by model_dump here and 
+    # pass that along rather than the schema itself.
+    filters_dict = filters.model_dump(exclude_none = True)
+    tea_profiles = repo.list(filters = filters_dict, limit = limit, offset = offset)
+    return tea_profiles
 
 @router.get("/{tea_profile_id}", response_model = TeaProfileSchema, 
     responses = COMMON_RESPONSES # type: ignore
 )
 def get_tea_profile(tea_profile_id: int, session: Session = Depends(get_session)):
     '''Gets an entire tea profile for one tea.'''
-    tea_profile = session.get(TeaProfileModel, tea_profile_id)
-
-    if not tea_profile:
-        raise HTTPException(
-            status_code = status.HTTP_404_NOT_FOUND, 
-            detail = "A tea profile with the provided id was not found."
-        )
-    
+    repo = TeaProfilesRepository(session)
+    tea_profile = repo.get_by_id(tea_profile_id)
     return tea_profile

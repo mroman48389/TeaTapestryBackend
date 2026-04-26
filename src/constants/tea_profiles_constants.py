@@ -12,7 +12,7 @@ class TeaProfileModelFields:
 
     COUNTRY_OF_ORIGIN = "country_of_origin"
     SUBREGIONS = "subregions"
-    AVG_PRICE_PER_OZ_USD = "avg_price_per_oz_usd"
+    # AVG_PRICE_PER_OZ_USD = "avg_price_per_oz_usd"
 
     LIQUOR_APPEARANCE = "liquor_appearance"
     LIQUOR_AROMA = "liquor_aroma"

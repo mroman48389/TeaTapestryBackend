@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 
-from src.db.base import SessionLocal
+from src.db.engine import SessionLocal
 
 # Generators are functions that yield control back to their calling function at
 # some point in the code. So when this is called, it opens a new SQLAlchemy

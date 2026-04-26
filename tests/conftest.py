@@ -1,3 +1,5 @@
+import os #changeA
+from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 import pytest
 import csv
@@ -7,29 +9,86 @@ from sqlalchemy.orm import sessionmaker
 
 from src.app.main import app
 from src.db.base import Base
+# SQLAlchemy only creates tables for models that have been imported into memory. #changeA
+from src.db.models.tea_profiles_model import TeaProfileModel  #changeA
+from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.constants.model_metadata_constants import DELIMITER_VALUE
-from tests.utils.test_utils import get_id_from_tea_name
+
+os.environ["PYTEST_RUNNING"] = "1" #changeA
 
 # Report leaks (slow)
 # tracemalloc.start()
 
-
+#changeA
 # FastAPI provides the TestClient helper for simulating HTTP requests without
 # running a server. It's like a mock browser. Define it here, since we'll be using it
 # in our route tests.
 @pytest.fixture
-def client():
+def client(create_test_db):
+    # Override FastAPI's DB dependency so routes use the test DB
+    def override_get_session():
+        print("DEBUG: USING TEST DB SESSION")
+        print("DEBUG: SESSION BIND:", create_test_db.bind)
+        print("DEBUG: OVERRIDE SESSION CONNECTION:", create_test_db.connection())
+        print("DEBUG: OVERRIDE ENGINE ID:", id(create_test_db.bind))
+        try:
+            yield create_test_db
+        finally:
+            pass
+
+    app.dependency_overrides[get_session] = override_get_session
+
     with TestClient(app) as c:
         yield c
 
+    # Clean up after test
+    app.dependency_overrides.clear()
 
-@pytest.fixture(scope = "session")
-def long_jing_tea_profile_id():
-    """Fetches the ID for Long Jing after ingestion has run."""
-    return get_id_from_tea_name("Long Jing")
+#Old:
+# @pytest.fixture
+# def client():
+#     with TestClient(app) as c:
+#         yield c
 
+@pytest.fixture
+def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
+    obj = create_test_db.query(TeaProfileModel).filter_by(name="Long Jing").first()
+    return obj.id
 
+#Old
+# @pytest.fixture(scope = "session")
+# def long_jing_tea_profile_id():
+#     """Fetches the ID for Long Jing after ingestion has run."""
+#     return get_id_from_tea_name("Long Jing")
+
+@pytest.fixture(scope="function")
+def create_test_db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool
+    )
+
+    # IMPORTANT: open a single shared connection
+    connection = engine.connect()
+
+    # Bind the metadata to this connection explicitly
+    Base.metadata.create_all(bind=connection)
+
+    # Create a sessionmaker bound to THIS connection
+    TestingSessionLocal = sessionmaker(bind=connection)
+
+    db = TestingSessionLocal()
+
+    try:
+        yield db
+    finally:
+        db.close()
+        connection.close()
+        engine.dispose()
+
+#Old changeA
 # Functions decorated with @pytest.fixture are 
 # automatically available to all tests in the same folder and
 # subfolders (no importing needed!) Fixtures can be scoped to
@@ -37,26 +96,42 @@ def long_jing_tea_profile_id():
 # class, module, session, etc. Function means the method will be created
 # and destroyed for each test we define. This function runs each test 
 # in a sandbox, so our real DBs and CSVs are untouched.
-@pytest.fixture(scope = "function")
-def create_test_db():
-    # Create a temporary, in-memory SQLite for isolation. 
-    engine = create_engine("sqlite:///:memory:")
-    TestingSessionLocal = sessionmaker(bind=engine)
+# @pytest.fixture(scope = "function")
+# def create_test_db():
+#     # Create a temporary, in-memory SQLite for isolation. 
+#     #changeA
+#     # engine = create_engine("sqlite:///:memory:")
+#     engine = create_engine(
+#         "sqlite:///:memory:?cache=shared",
+#         connect_args={"check_same_thread": False},
+#         poolclass=StaticPool
+#     )
+#     TestingSessionLocal = sessionmaker(bind=engine)
 
-    # Build a table.
-    Base.metadata.create_all(bind=engine)
+#     # Build a table.
+#     Base.metadata.create_all(bind=engine)
 
-    # Open session.
-    db = TestingSessionLocal()
+#     #changeA
+#     # DEBUG: what tables does SQLAlchemy think exist on this engine?
+#     with engine.connect() as conn:
+#         print("DEBUG: CREATE_TEST_DB CONNECTION:", conn)
+#     inspector = inspect(engine)
+#     print("DEBUG: TEST DB TABLES:", inspector.get_table_names())
+#     print("DEBUG: METADATA TABLES:", list(Base.metadata.tables.keys()))
+#     print("DEBUG: ENGINE POOL:", type(engine.pool))
+#     print("DEBUG: TEST ENGINE ID:", id(engine))
 
-    try:
-        # Hand session to the test.
-        yield db
+#     # Open session.
+#     db = TestingSessionLocal()
 
-    finally:
-        # Ensure resources are closed after each test.
-        db.close()
-        engine.dispose()
+#     try:
+#         # Hand session to the test.
+#         yield db
+
+#     finally:
+#         # Ensure resources are closed after each test.
+#         db.close()
+#         engine.dispose()
 
 
 @pytest.fixture
@@ -113,3 +188,28 @@ def create_test_csv(tmp_path):
         return str(csv_file)
     
     return _create_csv
+
+@pytest.fixture
+def seed_tea_profiles(create_test_db):
+    create_test_db.add(TeaProfileModel(
+        name="Long Jing",
+        alternative_names=["Dragonwell", "Dragon Well"],
+        tea_type="green",
+        cultivars=["Longjing #43"],
+        processing="pan-fired",
+        oxidation_level="low",
+        cultural_significance="Top 10 tea of China",
+        cultural_significance_source="Various",
+        country_of_origin="China",
+        subregions=["Hangzhou"],
+        liquor_appearance=["pale green"],
+        liquor_aroma=["fresh", "chestnut"],
+        liquor_taste=["smooth", "sweet"],
+        liquor_body_mouthfeel=["light"],
+        body_effect=["calming"],
+        dry_leaf_appearance=["flat", "green"],
+        dry_leaf_aroma=["nutty"],
+        wet_leaf_appearance=["tender"],
+        wet_leaf_aroma=["fresh"]
+    ))
+    create_test_db.commit()

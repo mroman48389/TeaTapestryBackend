@@ -61,7 +61,7 @@ def test_insert_into_staging_postgres(monkeypatch):
 
     # make_df_sqlite_compatible(df, TeaProfileModel)
 
-    df = insert_into_staging(df, "tea_profiles_staging", TeaProfileModel, engine)
+    insert_into_staging(df, "tea_profiles_staging", TeaProfileModel, engine)
 
     # Assert schema was added for PostgreSQL.
     assert captured["schema"] == "staging"

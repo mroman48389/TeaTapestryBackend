@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Numeric, Text
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -7,7 +7,7 @@ from src.constants.tea_profiles_constants import (
     TeaProfileModelFields, REQUIRED_TEA_PROFILE_MODEL_FIELDS
 )
 from src.constants.model_metadata_constants import (
-    DELIMITER_INFO_DICT, IS_PRICE_INFO_DICT
+    DELIMITER_INFO_DICT
 )
 
 
@@ -131,11 +131,11 @@ class TeaProfileModel(Base):
     #     nullable = is_nullable(TeaProfileModelFields.AVG_PRICE_PER_OZ_USD),
     #     info = IS_PRICE_INFO_DICT
     # )
-    avg_price_per_oz_usd: Mapped[float] = mapped_column(
-        Numeric(7, 2),
-        nullable = is_nullable(TeaProfileModelFields.AVG_PRICE_PER_OZ_USD),
-        info = IS_PRICE_INFO_DICT
-    )
+    # avg_price_per_oz_usd: Mapped[float] = mapped_column(
+    #     Numeric(7, 2),
+    #     nullable = is_nullable(TeaProfileModelFields.AVG_PRICE_PER_OZ_USD),
+    #     info = IS_PRICE_INFO_DICT
+    # )
     
     # liquor_appearance = Column(
     #     SQLiteCompatibleArray(),

@@ -4,7 +4,7 @@ import csv
 
 from src.db.models.tea_profiles_model import TeaProfileModel
 from src.utils.session_utils import get_session_cm
-from src.utils.csv_utils import parse_array, parse_numeric
+from src.utils.csv_utils import parse_array
 
 # SQL Equivalent:
 # INSERT INTO tea_profiles (name, tea_type, country_of_origin, avg_price_per_oz_usd)
@@ -77,7 +77,7 @@ def seed_tea_profiles(session, csv_file_path):
 
                     country_of_origin = row['country_of_origin'],
                     subregions = parse_array(row['subregions']),
-                    avg_price_per_oz_usd = parse_numeric(row['avg_price_per_oz_usd']),
+                    # avg_price_per_oz_usd = parse_numeric(row['avg_price_per_oz_usd']),
 
                     liquor_appearance = parse_array(row['liquor_appearance']),
                     liquor_aroma = parse_array(row['liquor_aroma']),
