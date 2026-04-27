@@ -31,6 +31,6 @@ if __name__ == "__main__":
             )
         logger.info("tea_profiles ingestion complete.")
         
-    except Exception as e:
+    except Exception:
         logger.exception("Ingestion failed.")
         raise

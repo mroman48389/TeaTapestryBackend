@@ -20,10 +20,6 @@ jobs:
     linting-and-testing:
         runs-on: ubuntu-latest
 
-        # Sentry DSN added via GitHub --> Settings --> Secrets --> Actions --> New repository secret
-        env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-
         # On GitHub, Settings --> Secrets and variables --> Actions (Added as repository secrets)
         services:
           postgres:
@@ -45,6 +41,8 @@ jobs:
               --health-retries=5
 
         env:
+          # Sentry DSN added via GitHub --> Settings --> Secrets --> Actions --> New repository secret
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           DATABASE_URL: "postgresql+psycopg2://${{ secrets.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.CI_POSTGRES_DB }}"
           # Ensure seed data doesn't vanish before pytest runs using a file-based SQLite DB.
           # Migrations, seeding, and tests will all use this file.

@@ -27,7 +27,7 @@ def ingest_data(session, csv_path: str, model, required_fields, conflict_cols: l
 
         session.commit()
 
-    except Exception as e:
+    except Exception:
         session.rollback()
         logger.exception("Ingestion failed.")
 
