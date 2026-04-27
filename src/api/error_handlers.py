@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette import status
 
+from sentry_sdk import set_context
+
 from src.app.errors import (
     DomainError,
     TeaProfileNotFoundError,
@@ -99,6 +101,18 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: TeaProfileNotFoundError
     ) -> JSONResponse:
         
+        # Attach request-specific context to Sentry.
+        # 
+        # We add the request_id here (inside each exception handler) because:
+        #     Sentry captures context at the moment the exception handler runs.
+        #     _error_response() must remain pure and unaware of Sentry.
+        #     Each handler already has access to the request, so this is the correct layer.
+        #     Context is thread‑local, so setting it here avoids leaking data across requests.
+        #     Ensures every Sentry event includes the request_id for cross‑service debugging.
+
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
         return _error_response(
             request = request,
             exc_type = exc.__class__.__name__,
@@ -112,6 +126,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: TeaProfileValidationError
     ) -> JSONResponse:
         
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
         return _error_response(
             request = request,
             exc_type = exc.__class__.__name__,
@@ -125,6 +142,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: TeaProfileConflictError
     ) -> JSONResponse:
         
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
         return _error_response(
             request = request,
             exc_type = exc.__class__.__name__,
@@ -138,6 +158,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: TeaProfileQueryError
     ) -> JSONResponse:
         
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
         return _error_response(
             request = request,
             exc_type = exc.__class__.__name__,
@@ -151,6 +174,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: DomainError
     ) -> JSONResponse:
         
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})        
+
         # Fallback for any DomainError not explicitly mapped above.
         return _error_response(
             request = request,
@@ -165,6 +191,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: Exception
     ) -> JSONResponse:
         
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
         # Last-resort catch-all: never leak raw exceptions to clients.
         logger.exception("Unhandled exception", exc_info = exc)
 

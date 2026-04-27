@@ -1,8 +1,13 @@
+import logging
+
 from src.utils.session_utils import get_session_cm
 from src.ingest.ingest import ingest_data
 from src.db.models.tea_profiles_model import (
     TeaProfileModel, TeaProfileModelFields, REQUIRED_TEA_PROFILE_MODEL_FIELDS
 )
+
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
 
 # Only run this block if the file is executed directly as the main
 # program and not if the file is imported. 
@@ -24,8 +29,8 @@ if __name__ == "__main__":
                 ],
                 [TeaProfileModelFields.NAME]
             )
-        print("tea_profiles ingestion complete")
+        logger.info("tea_profiles ingestion complete.")
         
     except Exception as e:
-        print("Ingestion failed: ", e)
+        logger.exception("Ingestion failed.")
         raise

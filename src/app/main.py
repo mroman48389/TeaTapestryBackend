@@ -4,7 +4,11 @@ import os
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import sentry_sdk
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
+from .logging_config import configure_logging
 from src.db.base import Base
 from src.api.routers.tea_profiles_router import router as tea_profiles_router
 from src.api.error_handlers import register_exception_handlers
@@ -28,6 +32,27 @@ async def lifespan(app: FastAPI):
     ###################################################
 
     # This code runs on shutdown, if needed:
+
+# dsn: Where to send events.
+#
+# integrations: Instrument SQLAlchemy so we can see DB queries in traces and
+#     breadbrumbs. FastAPI is done automatically now.
+#
+# send_default_pii: Set to false so we don't send personally identifiable information
+#     like IP addresses, cookies, user identifiers, request headers.
+#
+# traces_sample_rate: Control performance tracing where 0.0 = disabled and 
+#     1.0 = capture all traces.
+sentry_sdk.init(
+    dsn = os.getenv("SENTRY_DSN"), # where to send events
+    integrations = [
+        SqlalchemyIntegration(),
+    ],
+    send_default_pii = False,
+    traces_sample_rate = 0.0,  # will adjust  later
+)
+
+configure_logging()
 
 # Create instance of FastAPI. All routes, middleware, and configurations will
 # flow through this.

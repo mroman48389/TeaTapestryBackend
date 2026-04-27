@@ -1,6 +1,7 @@
 from typing import Type, Optional
 import pandas as pd
 from sqlalchemy import ARRAY, Numeric, Text, String, Boolean
+import logging
 
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.db.base import Base
@@ -8,6 +9,9 @@ from src.constants.model_metadata_constants import (
     DELIMITER_KEY, DELIMITER_VALUE, IS_PRICE_KEY
 )
 from src.utils.model_utils import get_model_column_names
+
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
 
 def parse_array(value: str | None, delimiter: str = DELIMITER_VALUE) -> list[str]:
     # If the value is a string, strip whitespace
@@ -86,8 +90,7 @@ def load_and_clean_csv(
             Cleaned DataFrame ready for insertion into staging table.
     '''
 
-    # print("Raw CSV DataFrame before cleaning:")
-    # print(pd.read_csv(csv_path))
+    # logger.debug(f"Raw CSV DataFrame before cleaning:\n {pd.read_csv(csv_path)}")
 
     # Load CSV into dataframe.
     df = pd.read_csv(csv_path)

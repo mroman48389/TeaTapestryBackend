@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import text
 # from sqlalchemy import inspect
 
@@ -10,6 +12,9 @@ from src.constants.tea_profiles_constants import (
 )
 from src.utils.sample_data_utils import get_sample_tea_profiles_data
 from tests.utils.test_utils import make_df_sqlite_compatible
+
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
 
 def test_ingest_data(monkeypatch, create_test_db, create_test_csv):
     # Use create_test_csv fixture to create a CSV file with sample data
@@ -44,25 +49,6 @@ def test_ingest_data(monkeypatch, create_test_db, create_test_csv):
     # $env:PYTHONPATH="C:\Proj\TeaTapestryBackend"
     # >> pytest tests\ingest\ingest_test.py::test_ingest_data -s
     
-    # print(
-    #     "Rows in staging:",
-    #     create_test_db.execute(text("SELECT COUNT(*) FROM tea_profiles_staging")).scalar()
-    # )
-    # print(
-    #     "Rows in base:",
-    #     create_test_db.execute(text("SELECT COUNT(*) FROM tea_profiles")).scalar()
-    # )
-    
-    # insp = inspect(create_test_db.bind)
-    # print("Tables in DB:", insp.get_table_names())
-    # print("Columns in tea_profiles_staging:", insp.get_columns("tea_profiles_staging"))
-    # print("Columns in tea_profiles:", insp.get_columns("tea_profiles"))
-    # with open(csv_file) as f:
-    #     print("CSV contents:\n", f.read())
-
-    # rows = list(create_test_db.execute(text("SELECT * FROM tea_profiles_staging")))
-    # print("Staging rows:", rows)
-
     # Query the test DB to confirm the row was inserted
     result = create_test_db.query(TeaProfileModel).filter_by(
         name = sample_tea_profiles_data[TeaProfileModelFields.NAME]).first()

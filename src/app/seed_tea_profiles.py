@@ -1,10 +1,14 @@
 # One-time seeding from original CSV
 
 import csv
+import logging
 
 from src.db.models.tea_profiles_model import TeaProfileModel
 from src.utils.session_utils import get_session_cm
 from src.utils.csv_utils import parse_array
+
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
 
 # SQL Equivalent:
 # INSERT INTO tea_profiles (name, tea_type, country_of_origin, avg_price_per_oz_usd)
@@ -135,4 +139,4 @@ if __name__ == "__main__":
             session,
             "data/seeds/tea_profiles_2025-11-12.csv"
         )
-    print("tea_profiles seeding complete")
+    logger.info("tea_profiles seeding complete.")

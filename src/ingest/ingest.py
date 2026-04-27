@@ -1,16 +1,21 @@
+import logging
+
 from src.ingest.staging import create_staging_table, insert_into_staging
 from src.ingest.validate import remove_duplicates
 from src.ingest.upsert import upsert_from_staging
 from src.utils.csv_utils import load_and_clean_csv
 
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
+
 def ingest_data(session, csv_path: str, model, required_fields, conflict_cols: list[str]):
     df = load_and_clean_csv(csv_path, model, required_fields, conflict_cols)
 
-    # print("Loaded DataFrame from CSV:")
-    # print(df)
-    # print("DataFrame dtypes:")
-    # print(df.dtypes)
-    # print("DataFrame shape:", df.shape)
+    # logger.debug("Loaded DataFrame from CSV")
+    # logger.debug(df)
+    # logger.debug("DataFrame dtypes:")
+    # logger.debug(df.dtypes)
+    # logger.debug(f"DataFrame shape: {df.shape}")
 
     base_table_name = model.__tablename__
 
@@ -24,7 +29,7 @@ def ingest_data(session, csv_path: str, model, required_fields, conflict_cols: l
 
     except Exception as e:
         session.rollback()
-        print(f"Ingestion failed: {e}")
+        logger.exception("Ingestion failed.")
 
 if __name__ == "__main__":
     raise RuntimeError(

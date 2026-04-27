@@ -4,6 +4,10 @@
 from starlette import status
 import sys
 import os
+import logging
+
+# use __name__ to get a logger named after the module we're in.
+logger = logging.getLogger(__name__)
 
 # from src.app.main import app
 # from tests.utils.test_utils import get_path_with_dummy_params
@@ -42,8 +46,7 @@ sys.path.insert(
 #                 response = client.delete(path)
 
 #             # Log the route and status code for visibility
-#             print(f"{method} {path} --> {response.status_code}")
-
+#             logger.debug(f"{method} {path} --> {response.status_code}")
 #             # Assert that the response is not a server error,  Status codes below 500 
 #             # are non-server errors.
 #             assert response.status_code < 500, f"{path} is not covered."
