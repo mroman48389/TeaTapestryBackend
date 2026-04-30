@@ -2,12 +2,8 @@ from sqlalchemy import create_engine
 
 from sqlalchemy.orm import sessionmaker
 
-from dotenv import load_dotenv
 import os
 import urllib.parse
-
-# Load variables from .env into environment
-load_dotenv()
 
 # Prefer DATABASE_URL if set (e.g. in CI)
 DATABASE_URL = os.getenv("DATABASE_URL")
