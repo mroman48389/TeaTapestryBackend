@@ -1,5 +1,5 @@
 param(
-    [string]$DatabaseName = $env:DB_NAME
+    [string]$DatabaseName
 )
 
 # Connects to postgreSQL database. Run this script like this:
@@ -31,27 +31,36 @@ Get-Content $envPath | ForEach-Object {
     }
 }
 
-# If no database name was passed, use the one from .env
-if (-not $DatabaseName -or $DatabaseName -eq "") {
-    $DatabaseName = $env:DB_NAME
+# Parse DATABASE_URL
+if (-not $env:DATABASE_URL) {
+    Write-Error "DATABASE_URL is not set in .env"
+    exit 1
 }
 
-# Set PGPASSWORD so psql uses it automatically
-$env:PGPASSWORD = $env:DB_PASS
-
-# Show what we're about to use
-Write-Host ("User: {0}, Host: {1}, Port: {2}, DB: {3}" -f $env:DB_USER, $env:DB_HOST, $env:DB_PORT, $DatabaseName)
-
-# Sanity check
-foreach ($name in @("DB_USER","DB_HOST","DB_PORT","DB_PASS")) {
-    $val = (Get-Item "env:$name").Value
-    if (-not $val -or $val -eq "") {
-        Write-Error "$name is not set. Check your .env file."
-        exit 1
-    }
+# Example: postgresql+psycopg2://user:pass@host:5432/dbname
+$regex = '^postgresql\+\w+://(?<user>[^:]+):(?<pass>[^@]+)@(?<host>[^:]+):(?<port>\d+)/(?<db>.+)$'
+if ($env:DATABASE_URL -notmatch $regex) {
+    Write-Error "DATABASE_URL is not in a recognized format."
+    exit 1
 }
 
-# Connect to Postgres
-psql -U $env:DB_USER -h $env:DB_HOST -p $env:DB_PORT -d $DatabaseName
+$user = $matches['user']
+$pass = $matches['pass']
+$host = $matches['host']
+$port = $matches['port']
+$db   = $matches['db']
+
+# Override DB name if passed as param
+if ($DatabaseName) {
+    $db = $DatabaseName
+}
+
+# Set PGPASSWORD for psql
+$env:PGPASSWORD = $pass
+
+Write-Host ("User: {0}, Host: {1}, Port: {2}, DB: {3}" -f $user, $host, $port, $db)
+
+# Connect
+psql -U $user -h $host -p $port -d $db
 
 Write-Host "Connected to PostgreSQL..."

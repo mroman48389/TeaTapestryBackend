@@ -1,7 +1,8 @@
 import logging
+import glob
 
 from src.utils.session_utils import get_session_cm
-from src.ingest.ingest import ingest_data
+from src.ingest.pipeline_orchestrator import ingest_data
 from src.db.models.tea_profiles_model import (
     TeaProfileModel, TeaProfileModelFields, REQUIRED_TEA_PROFILE_MODEL_FIELDS
 )
@@ -19,16 +20,19 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     try:
         with get_session_cm() as session:
-            ingest_data(
-                session,
-                "data/ingestion/tea_profiles_ingestion_testing.csv",
-                TeaProfileModel,
-                [
-                    field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
-                    if field != TeaProfileModelFields.ID
-                ],
-                [TeaProfileModelFields.NAME]
-            )
+            for csv_path in glob.glob("data/ingestion/batch/*.csv"):
+                ingest_data(
+                    session,
+                    csv_path,
+                    TeaProfileModel,
+                    [
+                        field for field in REQUIRED_TEA_PROFILE_MODEL_FIELDS 
+                        if field != TeaProfileModelFields.ID
+                    ],
+                    [TeaProfileModelFields.NAME]
+                )
+                logger.info(f"Ingested {csv_path}")
+                
         logger.info("tea_profiles ingestion complete.")
         
     except Exception:

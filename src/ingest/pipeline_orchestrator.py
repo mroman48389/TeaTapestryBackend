@@ -1,8 +1,8 @@
 import logging
 
-from src.ingest.staging import create_staging_table, insert_into_staging
-from src.ingest.validate import remove_duplicates
-from src.ingest.upsert import upsert_from_staging
+from src.ingest.staging_table_manager import create_staging_table, insert_into_staging
+from src.ingest.validate_records import remove_duplicates
+from src.ingest.upsert_records import upsert_from_staging
 from src.utils.csv_utils import load_and_clean_csv
 
 # use __name__ to get a logger named after the module we're in.

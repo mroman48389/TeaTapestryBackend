@@ -2,9 +2,16 @@
 
 Write-Host "Running tests via Pytest..."
 
-# Tell Python the root of all imports. Lets us run .\test.ps1 instead of 
-# $env:PYTHONPATH="." ; pytest
-$env:PYTHONPATH = "."
-pytest
+# Compute absolute project root
+$projectRoot = Join-Path $PSScriptRoot "..\.."
+
+# Compute absolute src path
+$srcPath = Join-Path $projectRoot "src"
+
+# Set PYTHONPATH for this process only
+$env:PYTHONPATH = $srcPath
+
+# Run pytest with explicit rootdir
+pytest --rootdir $projectRoot
 
 Write-Host "Done running tests."

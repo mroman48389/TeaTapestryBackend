@@ -5,16 +5,13 @@
 # a consistent JSON error shape.
 
 from __future__ import annotations
-
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 from uuid import uuid4
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette import status
-
 from sentry_sdk import set_context
 
 from src.app.errors import (
@@ -25,7 +22,7 @@ from src.app.errors import (
     TeaProfileQueryError,
 )
 
-# Set up a logger for this module. __name__ will produce "src.api.error_handlers". This
+# Set up a logger for this module. __name__ will produce "api.error_handlers". This
 # will tell us the name of the file that produced messages in logs. We can enable or
 # disable them per module, filter logs by module name, and have more control over our
 # log information.

@@ -4,9 +4,9 @@ from sqlalchemy import text
 # from sqlalchemy import inspect
 
 from src.db.models.tea_profiles_model import TeaProfileModel
-from src.ingest.ingest import ingest_data
-import src.ingest.ingest as ingest_module
-import src.ingest.staging as staging
+from src.ingest.pipeline_orchestrator import ingest_data
+import src.ingest.pipeline_orchestrator as ingest_module
+import src.ingest.staging_table_manager as staging_table_manager
 from src.constants.tea_profiles_constants import (
     REQUIRED_TEA_PROFILE_MODEL_FIELDS, TeaProfileModelFields
 )
@@ -23,7 +23,7 @@ def test_ingest_data(monkeypatch, create_test_db, create_test_csv):
     sample_tea_profiles_data = get_sample_tea_profiles_data()
     csv_file = create_test_csv(TeaProfileModel, sample_tea_profiles_data)
 
-    original_insert_into_staging = staging.insert_into_staging
+    original_insert_into_staging = staging_table_manager.insert_into_staging
 
     # Monkeypatch insert_into_staging to serialize lists for SQLite
     def patched_insert_into_staging(df, *args, **kwargs):

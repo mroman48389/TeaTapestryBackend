@@ -33,24 +33,37 @@ function getBackendDirs() {
         });
 }
 
-/* Patterns that often indicate secrets */
 const SUSPICIOUS_PATTERNS = [
-    "sk_",
-    "service_role",
-    "AIza",
-    "xoxb-",
-    "xoxp-",
+    /* Common API key prefixes */
+    "sk_",                // Stripe secret keys
+    "rk_",                // Stripe restricted keys
+    "service_role",       // Supabase service role keys
+    "AIza",               // Google API keys
+    "xoxb-",              // Slack bot tokens
+    "xoxp-",              // Slack user tokens
+
+    /* Private key indicators */
     "BEGIN PRIVATE KEY",
+    "BEGIN RSA PRIVATE KEY",
+    "BEGIN OPENSSH PRIVATE KEY",
+
+    /* AWS keys */
     "AWS_SECRET_ACCESS_KEY",
     "AWS_ACCESS_KEY_ID",
+
+    /* JWT / auth secrets */
     "jwt_secret",
     "JWT_SECRET",
     "SECRET_KEY",
-    "DATABASE_URL",
-    "DB_PASSWORD",
-    "DB_USER",
+
+    /* OAuth tokens */
     "ACCESS_TOKEN",
-    "REFRESH_TOKEN"
+    "REFRESH_TOKEN",
+
+    /* Database URLs (hardcoded) */
+    "postgres://",
+    "postgresql://",
+    "postgresql+psycopg2://",
 ];
 
 /* Returns all files in the specified directory using fileFilter to decide what to 

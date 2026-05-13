@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 import pandas as pd
 
-from src.ingest.staging import create_staging_table
-from src.ingest.staging import insert_into_staging
+from src.ingest.staging_table_manager import create_staging_table
+from src.ingest.staging_table_manager import insert_into_staging
 from src.db.models.tea_profiles_model import TeaProfileModel
 
 def test_create_staging_table_postgres(monkeypatch):

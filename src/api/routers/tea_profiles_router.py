@@ -9,7 +9,8 @@ from src.utils.session_utils import get_session
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
 from src.api.constants.responses import COMMON_RESPONSES
 from src.db.repositories.tea_profiles_repository import TeaProfilesRepository
-from src.app.rate_limit import rate_limiter, HIGH_RATE_LIMIT, LOW_RATE_LIMIT
+from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
+from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.cache.simple_cache import cache, CacheEntry
 from src.utils.etag import generate_etag
 from src.utils.date_utils import http_date
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Define group of routes with api/tea_profiles as their base path and tea_profiles
 # for documentation grouping.
-router = APIRouter(prefix="/api/v1/tea_profiles", tags=["tea_profiles"])
+router = APIRouter(prefix = "/api/v1/tea_profiles", tags = ["tea_profiles"])
 
 # Custom FastAPI dependency so that we can set up TeaProfileFilters as a query
 # rather than a body in out route below. Looks at the query string of an incoming
@@ -208,7 +209,14 @@ async def _get_tea_profiles_common(
 # def get_x(filters: TeaProfileFilters):             # body
 # def get_x(filters: TeaProfileFilters = Depends()): # query
 # def get_x(limit: int = Query(10)):                 # query
+#
+# IMPORTANT: We must register both "[routePrefix]" and "[routePrefix]/" to avoid
+# FastAPI's default trailing-slash 307 redirect, which downgrades HTTPS to HTTP
+# and gets blocked by browsers as mixed content in production.
 
+@router.get("", response_model = List[TeaProfileSchema], 
+    responses = COMMON_RESPONSES # type: ignore
+)
 @router.get("/", response_model = List[TeaProfileSchema], 
     responses = COMMON_RESPONSES # type: ignore
 )
@@ -235,6 +243,11 @@ async def get_tea_profiles(
 
 # Optimization: HEAD requests are a cheap way for clients to determine if resources
 # have changed without downloading bodies. Clients must explicitly do HEAD calls.
+@router.head("", 
+    summary="HEAD version of get_tea_profiles",
+    include_in_schema = True, # FastAPI does not autodocument HEADs.
+    responses = COMMON_RESPONSES # type: ignore
+)
 @router.head("/", 
     summary="HEAD version of get_tea_profiles",
     include_in_schema = True, # FastAPI does not autodocument HEADs.
@@ -351,6 +364,7 @@ async def _get_tea_profile_common(
             return Response(status_code = status.HTTP_200_OK, headers = dict(response.headers))
         else:
             return cached_value
+
 
 @router.get("/{tea_profile_id}", response_model = TeaProfileSchema, 
     responses = COMMON_RESPONSES # type: ignore

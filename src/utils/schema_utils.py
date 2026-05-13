@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic import BaseModel, create_model
 from sqlalchemy.types import Numeric
+
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 
 def get_schema_from_model(model, name: str | None = None) -> type[BaseModel]:

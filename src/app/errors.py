@@ -5,7 +5,6 @@
 # so these will generally be sparse/bare.
 
 from __future__ import annotations
-
 from typing import Any, Mapping, Optional
 
 
