@@ -42,8 +42,11 @@ jobs:
 
         env:
           # Sentry DSN added via GitHub --> Settings --> Secrets --> Actions --> New repository secret
+          # Secrets are in .env file. KEEP DATABASE_URL SEPARATED so we use the local database and NOT the real one.
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           DATABASE_URL: "postgresql+psycopg2://${{ secrets.CI_POSTGRES_USER }}:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.CI_POSTGRES_DB }}"
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           # Ensure seed data doesn't vanish before pytest runs using a file-based SQLite DB.
           # Migrations, seeding, and tests will all use this file.
           # DATABASE_URL: "sqlite:///./test.db"
