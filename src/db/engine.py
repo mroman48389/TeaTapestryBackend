@@ -7,7 +7,12 @@ from src.core.config import settings
 # instance of the SQLAlchemy engine. SQLAlchemy will use this
 # to send queries and receive results. echo = True will print every SQL
 # statement to the console.
-engine = create_engine(settings.database_url, echo = True)
+engine = create_engine(
+    settings.database_url, 
+    echo = True,
+    pool_pre_ping = True, # test connections before using them
+    pool_recycle = 300 # force SQLAlchemy to drop stale connections
+)
 
 # Create session factory so sessions can talk to the database.
 # SessionLocal is a function call that behaves like a class and
