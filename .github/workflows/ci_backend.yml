@@ -1,5 +1,6 @@
-# CI/CD: GitHub Actions workflow for automated linting and other CI/CD on push/pull requests.
-name: Backend CI/CD  # workflow name (shows up in GitHub Actions tab)
+# CI for linting, testing, etc. that runs for all backend branches (feature, develop, main branches). 
+# Runs on pushes to any branch and pull requests that touch .py files. Our validation pipeline.
+name: Backend Integration  # workflow name (shows up in GitHub Actions tab)
 
 # GitHub will run this workflow on pushes and pull requests for the "main" (production) branch.
 on:
