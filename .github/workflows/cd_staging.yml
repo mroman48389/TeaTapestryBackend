@@ -35,6 +35,9 @@ jobs:
           flyctl deploy --remote-only --app ${{ secrets.FLY_STAGING_APP_NAME }}
 
       - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.FLY_STAGING_DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.FLY_STAGING_JWT_SECRET }}
         run: alembic upgrade head
 
       - name: Run smoke tests
