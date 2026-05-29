@@ -327,7 +327,7 @@ async def _get_tea_profile_common(
             else:
                 return cached_value
 
-        # If there is no existing cached tea profile, proceed as normal.
+        # If there is no existing cached tea profile, proceed as normal. 
         repo = TeaProfilesRepository(session)
         with sentry_sdk.start_span(op = "db", name = "fetch tea profile"):
             tea_profile = repo.get_by_id(tea_profile_id)

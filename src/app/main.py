@@ -16,6 +16,7 @@ from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.db.base import Base
 from src.api.routers.debug_router import router as debug_router
 from src.api.routers.tea_profiles_router import router as tea_profiles_router
+from src.api.routers.health_router import router as health_router
 from src.api.error_handlers import register_exception_handlers
 
 ###############################################################################
@@ -89,6 +90,7 @@ if ENV == "development":
     app.include_router(debug_router)
 
 app.include_router(tea_profiles_router)
+app.include_router(health_router)
 
 ###############################################################################
 ##############################   Rate Limiting   ##############################
@@ -114,10 +116,10 @@ app.add_middleware(SlowAPIMiddleware)
 register_rate_limit_handlers(app)
 
 ###############################################################################
-##################################   Routes   #################################
+#####################   Application Identity Routes   #########################
 ###############################################################################
 
-# Simple, inline routes.
+# Simple, inline application identity routes.
 
 # Define GET endpoint, telling FastAPI to respond to HTTP GET requests at the
 # root URL. async "root" function allows us to handle concurrent requests
@@ -150,8 +152,3 @@ async def get_version(request: Request):
     # backwards compatibility, minor = new features, changes that are
     # backward compatible, patch = bug fixes with no breaking changes
     return {"version": "1.0.0"}
-
-@app.get("/health")
-@rate_limiter.limit(HIGH_RATE_LIMIT)
-async def health(request: Request):
-    return {"status": "ok"}
