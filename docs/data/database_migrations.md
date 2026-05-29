@@ -28,4 +28,6 @@
 >
 >     	    alembic upgrade head
 >
+>       This step will be performed automatically in all CD workflows.
+>
 >    5. Refresh the table in pgAdmin and confirm the change is applied.
