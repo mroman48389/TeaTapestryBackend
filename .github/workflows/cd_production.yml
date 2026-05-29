@@ -32,3 +32,19 @@ jobs:
         run: flyctl deploy --remote-only --app tea-tapestry-backend
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_PRODUCTION_API_TOKEN }}
+
+      - name: Run smoke tests
+        run: |
+          echo "Checking root..."
+          curl -f https://tea-tapestry-backend.fly.dev/ || exit 1
+
+          echo "Checking version..."
+          curl -f https://tea-tapestry-backend.fly.dev/version || exit 1
+
+          echo "Checking health..."
+          curl -f https://tea-tapestry-backend.fly.dev/health || exit 1
+
+          echo "Checking resource connections..."
+          curl -f https://tea-tapestry-backend.fly.dev/health/connections || exit 1
+
+          echo "All production smoke tests passed."

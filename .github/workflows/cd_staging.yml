@@ -33,3 +33,19 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_STAGING_API_TOKEN }}
         run: |
           flyctl deploy --remote-only --app ${{ secrets.FLY_STAGING_APP_NAME }}
+
+      - name: Run smoke tests
+        run: |
+          echo "Checking root..."
+          curl -f https://${{ secrets.FLY_STAGING_APP_NAME }}.fly.dev/ || exit 1
+
+          echo "Checking version..."
+          curl -f https://${{ secrets.FLY_STAGING_APP_NAME }}.fly.dev/version || exit 1
+
+          echo "Checking health..."
+          curl -f https://${{ secrets.FLY_STAGING_APP_NAME }}.fly.dev/health || exit 1
+
+          echo "Checking resource connections..."
+          curl -f https://${{ secrets.FLY_STAGING_APP_NAME }}.fly.dev/health/connections || exit 1
+
+          echo "All staging smoke tests passed."
