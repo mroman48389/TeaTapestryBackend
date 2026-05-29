@@ -34,6 +34,9 @@ jobs:
         run: |
           flyctl deploy --remote-only --app ${{ secrets.FLY_STAGING_APP_NAME }}
 
+      - name: Run database migrations
+        run: alembic upgrade head
+
       - name: Run smoke tests
         run: |
           echo "Checking root..."
