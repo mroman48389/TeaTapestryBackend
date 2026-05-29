@@ -1,4 +1,4 @@
-# PowerShell: .\scripts\run.ps1
+# PowerShell: .\scripts\PowerShell\run.ps1
 
 Write-Host "Activating venv and starting Tea Tapestry backend via uvicorn..."
 
