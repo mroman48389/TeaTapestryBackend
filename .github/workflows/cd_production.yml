@@ -33,6 +33,13 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_PRODUCTION_API_TOKEN }}
 
+      # Run migrations from inside Fly instead of GitHub Actions, as it's safer and avoids IPv6 issues, 
+      # Supabase firewall, etc.
+      - name: Run database migrations
+        run: flyctl ssh console --app tea-tapestry-backend --command 'sh -c "cd /app && alembic upgrade head"'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_PRODUCTION_API_TOKEN }}
+
       - name: Run smoke tests
         run: |
           echo "Checking root..."
