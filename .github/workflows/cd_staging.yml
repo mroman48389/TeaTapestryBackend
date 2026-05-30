@@ -34,11 +34,12 @@ jobs:
         run: |
           flyctl deploy --remote-only --app ${{ secrets.FLY_STAGING_APP_NAME }}
 
+      # Run migrations from inside Fly instead of GitHub Actions, as it's safer and avoids IPv6 issues, 
+      # Supabase firewall, etc.
       - name: Run database migrations
+        run: flyctl ssh console --app ${{ secrets.FLY_STAGING_APP_NAME }} --command "alembic upgrade head"
         env:
-          DATABASE_URL: ${{ secrets.FLY_STAGING_DATABASE_URL }}
-          JWT_SECRET: ${{ secrets.FLY_STAGING_JWT_SECRET }}
-        run: alembic upgrade head
+          FLY_API_TOKEN: ${{ secrets.FLY_STAGING_API_TOKEN }}
 
       - name: Run smoke tests
         run: |
