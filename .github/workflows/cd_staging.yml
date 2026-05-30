@@ -37,7 +37,7 @@ jobs:
       # Run migrations from inside Fly instead of GitHub Actions, as it's safer and avoids IPv6 issues, 
       # Supabase firewall, etc.
       - name: Run database migrations
-        run: flyctl ssh console --app ${{ secrets.FLY_STAGING_APP_NAME }} --command "cd /app && alembic upgrade head"
+        run: flyctl ssh console --app ${{ secrets.FLY_STAGING_APP_NAME }} --command 'sh -c "cd /app && alembic upgrade head"'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_STAGING_API_TOKEN }}
 
