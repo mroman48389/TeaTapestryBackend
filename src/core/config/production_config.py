@@ -6,5 +6,6 @@ from src.core.config.base_config import BaseConfig
 class ProductionConfig(BaseConfig):
     model_config: SettingsConfigDict = {"extra": "ignore"}
 
-    cors_origins: ClassVar[list[str]] = ["https://teatapestry.com"]
+    cors_origins: ClassVar[list[str]] = ["https://tea-tapestry.netlify.app"]
+    # maybe someday "https://teatapestry.com"
     log_level: ClassVar[str] = "WARNING"
