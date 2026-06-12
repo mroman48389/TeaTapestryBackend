@@ -151,4 +151,6 @@ async def get_version(request: Request):
     # Format: major.minor.patch, where major = breaking changes that affect
     # backwards compatibility, minor = new features, changes that are
     # backward compatible, patch = bug fixes with no breaking changes
-    return {"version": "1.0.0"}
+    # Versioning strategy explanation can be found in a markdown file on the
+    # frontend. Description of changes can be found in the "What's New?" page
+    return {"version": "1.1.0"}
