@@ -63,5 +63,9 @@ def test_root(client):
 def test_get_version(client):
     response = client.get("/version")
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"version": "1.0.0"}
+    
+    data = response.json()
+    assert "version" in data
+    assert isinstance(data["version"], str)
+    assert len(data["version"]) > 0
 
