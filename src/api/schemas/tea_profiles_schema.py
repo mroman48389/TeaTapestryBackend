@@ -7,7 +7,8 @@ from src.utils.schema_utils import get_schema_from_model
 # Pydantic blueprint for API contract, dynamically generated from SQLAlchemy model. 
 # This schema defines how data is exposed through our API. Models JSON structure, 
 # gives type validation and serialization, and used for requests/response schemas 
-# in FastAPI.
+# in FastAPI. DO NOT do this for non-domain models like auth. Keep those contracts
+# explicit.
 TeaProfileSchema = get_schema_from_model(TeaProfileModel)
 
 # old, brittle way

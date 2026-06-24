@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-from .serialization import to_serializable
+from .serialization_utils import to_serializable
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)

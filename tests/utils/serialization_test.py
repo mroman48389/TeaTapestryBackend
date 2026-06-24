@@ -2,7 +2,7 @@ from sqlalchemy import String, Integer, Column
 from pydantic import BaseModel
 
 from src.db.base import Base
-from src.utils.serialization import to_serializable
+from src.utils.serialization_utils import to_serializable
 
 def test_to_serializable_pydantic():
     class PydanticModel(BaseModel):

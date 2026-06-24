@@ -12,7 +12,7 @@ from src.db.repositories.tea_profiles_repository import TeaProfilesRepository
 from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.cache.simple_cache import cache, CacheEntry
-from src.utils.etag import generate_etag
+from src.utils.etag_utils import generate_etag
 from src.utils.date_utils import http_date
 import logging
 
