@@ -17,6 +17,7 @@ from src.db.base import Base
 from src.api.routers.debug_router import router as debug_router
 from src.api.routers.tea_profiles_router import router as tea_profiles_router
 from src.api.routers.health_router import router as health_router
+from src.api.routers.auth_router import router as auth_router
 from src.api.error_handlers import register_exception_handlers
 
 ###############################################################################
@@ -91,6 +92,7 @@ if ENV == "development":
 
 app.include_router(tea_profiles_router)
 app.include_router(health_router)
+app.include_router(auth_router)
 
 ###############################################################################
 ##############################   Rate Limiting   ##############################

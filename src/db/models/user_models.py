@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from src.db.base import Base
 
 # SQLAlchemy blueprint for user table. This schema defines how data is stored in the database.
-class UserModel(Base):
+class UserInternalModel(Base):
     # SQLAlchemy needs this dunder to be called tablename to do its mapping.
     __tablename__ = "users"
 
@@ -33,18 +33,19 @@ class UserModel(Base):
         nullable = False,
     )
 
-    # DateTime(timezone = True) and datetime.now(timezone.utc) give us timezone-aware UTC timestamps.
+    # DateTime(timezone = True) and datetime.now(timezone.utc) give us 
+    # timezone-aware UTC timestamps.
     #
-    # Again, we use a lambda function to pass the function reference so SQLAlchemy generates a new datetime
-    # each time.
+    # Again, we use a lambda function to pass the function reference so SQLAlchemy 
+    # generates a new datetime each time.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone = True),
         default = lambda: datetime.now(timezone.utc),
         nullable = False,
     )
 
-    # onupdate = lambda: datetime.now(timezone.utc) means every time the user row is updated, updated_at 
-    # will be set to the current UTC timestamp.
+    # onupdate = lambda: datetime.now(timezone.utc) means every time the user row 
+    # is updated, updated_at will be set to the current UTC timestamp.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone = True),
         default = lambda: datetime.now(timezone.utc),

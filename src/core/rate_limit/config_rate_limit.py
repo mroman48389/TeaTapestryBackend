@@ -4,6 +4,7 @@ import os
 def _is_dev():
     return os.getenv("DEV_RATE_LIMIT", "false").lower() == "true"
 
-def GLOBAL_RATE_LIMIT(): return "10/minute"  if _is_dev() else "100/minute"
-def HIGH_RATE_LIMIT():   return "20/minute"  if _is_dev() else "200/minute"
-def LOW_RATE_LIMIT():    return "5/minute"   if _is_dev() else "30/minute"
+def GLOBAL_RATE_LIMIT(): return "10/minute" if _is_dev() else "100/minute"
+def HIGH_RATE_LIMIT(): return "20/minute" if _is_dev() else "200/minute"
+def LOW_RATE_LIMIT(): return "5/minute"  if _is_dev() else "30/minute"
+def VERY_LOW_RATE_LIMIT() : return "5/minute"

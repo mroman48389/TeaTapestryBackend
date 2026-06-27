@@ -4,6 +4,7 @@ from typing import List, get_origin, get_args, Union, cast, Any
 from datetime import datetime, timezone
 import sentry_sdk
 from starlette import status
+import logging
 
 from src.utils.session_utils import get_session
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
@@ -14,7 +15,6 @@ from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.cache.simple_cache import cache, CacheEntry
 from src.utils.etag_utils import generate_etag
 from src.utils.date_utils import http_date
-import logging
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
@@ -214,7 +214,9 @@ async def _get_tea_profiles_common(
 # FastAPI's default trailing-slash 307 redirect, which downgrades HTTPS to HTTP
 # and gets blocked by browsers as mixed content in production.
 
-@router.get("", response_model = List[TeaProfileSchema], 
+@router.get(
+    "", 
+    response_model = List[TeaProfileSchema], 
     responses = COMMON_RESPONSES # type: ignore
 )
 @router.get("/", response_model = List[TeaProfileSchema], 
@@ -381,7 +383,7 @@ async def get_tea_profile(
     )
 
 @router.head("/{tea_profile_id}", 
-    summary="HEAD version of get_tea_profile",
+    summary = "HEAD version of get_tea_profile",
     include_in_schema = True, # FastAPI does not autodocument HEADs.
     responses = COMMON_RESPONSES # type: ignore
 )

@@ -23,31 +23,6 @@ os.environ["PYTEST_RUNNING"] = "1"
 # Report leaks (slow)
 # tracemalloc.start()
 
-@pytest.fixture
-def client(create_test_db):
-    # Override FastAPI's DB dependency so routes use the test DB.
-    def override_get_session():
-        try:
-            yield create_test_db
-        finally:
-            pass
-
-    app.dependency_overrides[get_session] = override_get_session
-
-    # FastAPI provides the TestClient helper for simulating HTTP requests without
-    # running a server. It's like a mock browser. Define it here, since we'll be using it
-    # in our route tests.
-    with TestClient(app) as c:
-        yield c
-
-    # Clean up after test
-    app.dependency_overrides.clear()
-
-@pytest.fixture
-def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
-    obj = create_test_db.query(TeaProfileModel).filter_by(name="Long Jing").first()
-    return obj.id
-
 # Functions decorated with @pytest.fixture are 
 # automatically available to all tests in the same folder and
 # subfolders (no importing needed!) Fixtures can be scoped to
@@ -57,7 +32,7 @@ def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
 #
 # This fixture provides an isolated, in‑memory SQLite database for tests.
 # It ensures every test runs in a clean sandbox so no real database or files
-# are touched.
+# are touched. Use it instead of "Session" (from sqlalchemy.orm).
 @pytest.fixture(scope = "function")
 def create_test_db():
     # Create an in‑memory SQLite engine. Using StaticPool + check_same_thread=False
@@ -89,6 +64,56 @@ def create_test_db():
         db.close()
         connection.close()
         engine.dispose()
+
+@pytest.fixture
+def client(create_test_db):
+    # Override FastAPI's DB dependency so routes use the test DB.
+    def override_get_session():
+        try:
+            yield create_test_db
+        finally:
+            pass
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    # FastAPI provides the TestClient helper for simulating HTTP requests without
+    # running a server. It's like a mock browser. Define it here, since we'll be using it
+    # in our route tests.
+    with TestClient(app) as c:
+        yield c
+
+    # Clean up after test
+    app.dependency_overrides.clear()
+
+@pytest.fixture
+def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
+    obj = create_test_db.query(TeaProfileModel).filter_by(name="Long Jing").first()
+    return obj.id
+
+@pytest.fixture
+def seed_tea_profiles(create_test_db):
+    create_test_db.add(TeaProfileModel(
+        name="Long Jing",
+        alternative_names=["Dragonwell", "Dragon Well"],
+        tea_type="green",
+        cultivars=["Longjing #43"],
+        processing="pan-fired",
+        oxidation_level="low",
+        cultural_significance="Top 10 tea of China",
+        cultural_significance_source="Various",
+        country_of_origin="China",
+        subregions=["Hangzhou"],
+        liquor_appearance=["pale green"],
+        liquor_aroma=["fresh", "chestnut"],
+        liquor_taste=["smooth", "sweet"],
+        liquor_body_mouthfeel=["light"],
+        body_effect=["calming"],
+        dry_leaf_appearance=["flat", "green"],
+        dry_leaf_aroma=["nutty"],
+        wet_leaf_appearance=["tender"],
+        wet_leaf_aroma=["fresh"]
+    ))
+    create_test_db.commit()
 
 @pytest.fixture
 # Note that while we can rename fixture functions, you CANNOT rename fixture
@@ -144,28 +169,3 @@ def create_test_csv(tmp_path):
         return str(csv_file)
     
     return _create_csv
-
-@pytest.fixture
-def seed_tea_profiles(create_test_db):
-    create_test_db.add(TeaProfileModel(
-        name="Long Jing",
-        alternative_names=["Dragonwell", "Dragon Well"],
-        tea_type="green",
-        cultivars=["Longjing #43"],
-        processing="pan-fired",
-        oxidation_level="low",
-        cultural_significance="Top 10 tea of China",
-        cultural_significance_source="Various",
-        country_of_origin="China",
-        subregions=["Hangzhou"],
-        liquor_appearance=["pale green"],
-        liquor_aroma=["fresh", "chestnut"],
-        liquor_taste=["smooth", "sweet"],
-        liquor_body_mouthfeel=["light"],
-        body_effect=["calming"],
-        dry_leaf_appearance=["flat", "green"],
-        dry_leaf_aroma=["nutty"],
-        wet_leaf_appearance=["tender"],
-        wet_leaf_aroma=["fresh"]
-    ))
-    create_test_db.commit()

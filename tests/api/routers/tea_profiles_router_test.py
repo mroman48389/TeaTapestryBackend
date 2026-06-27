@@ -31,7 +31,7 @@ def test_head_tea_profiles(client, seed_tea_profiles):
         TeaProfileModelFields.ALTERNATIVE_NAMES: "Dragonwell,Dragon Well"
     }
 
-    response = client.head("/api/v1/tea_profiles", params=filters)
+    response = client.head("/api/v1/tea_profiles", params = filters)
 
     # HEAD should behave like GET but with no body
     assert response.status_code == status.HTTP_200_OK
@@ -51,7 +51,6 @@ def test_get_tea_profiles_limit_clamping(client, seed_tea_profiles):
     assert len(data) <= 200
 
 ######################################################################################################
-
 
 
 # "long jing id"       --> normal case; integer for existing tea profile. 

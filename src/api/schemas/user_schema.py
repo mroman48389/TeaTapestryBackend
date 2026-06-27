@@ -26,12 +26,13 @@ class UserInboundSchema(BaseModel):
     email: EmailStr
     password: str = Field(min_length = 8)
 
-# Exposed to the client. Public API contract used when the API returns a user object to the frontend. 
-# This should be used when returning a new user after they sign up, after the user logs in, whenever
-# we need to fetch the current user, and generally when returning user data in any endpoint.
+# Exposed to the client. Public API contract used when the API returns a user object 
+# to the frontend. This should be used when returning a new user after they sign up, 
+# after the user logs in, whenever we need to fetch the current user, and generally 
+# when returning user data in any endpoint.
 #
-# Contains fields that travel from server to client; ones that a client must not control for security and
-# data integrity reasons (such as IDs, created_at, timestamps).
+# Contains fields that travel from server to client; ones that a client must not 
+# control for security anddata integrity reasons (such as IDs, created_at, timestamps).
 class UserOutboundSchema(BaseModel):
     id: UUID
     email: EmailStr
