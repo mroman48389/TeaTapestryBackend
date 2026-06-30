@@ -14,6 +14,8 @@ from src.db.models.tea_profiles_model import TeaProfileModel
 from src.db.models.user_models import UserInternalModel # noqa: F401
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
+from src.utils.auth.password_utils import hash_password
+from src.utils.auth.jwt_utils import create_access_token, create_refresh_token
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 
 # Mark the process as a pytest run. The application checks this flag to skip 
@@ -170,3 +172,24 @@ def create_test_csv(tmp_path):
         return str(csv_file)
     
     return _create_csv
+
+@pytest.fixture
+def test_user(create_test_db):
+    user = UserInternalModel(
+        email = "testUser@testdomain.com",
+        hashed_password = hash_password("TestPassword@123") 
+    )
+
+    create_test_db.add(user)
+    create_test_db.commit()
+    create_test_db.refresh(user)
+
+    return user
+
+@pytest.fixture
+def access_token_for_test_user(test_user):
+    return create_access_token(str(test_user.id))
+
+@pytest.fixture
+def refresh_token_for_test_user(test_user):
+    return create_refresh_token(str(test_user.id))

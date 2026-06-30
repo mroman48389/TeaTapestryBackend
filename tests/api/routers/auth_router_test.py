@@ -82,7 +82,7 @@ def test_login_success(client, create_test_db):
     response = client.post("/auth/login", json = payload)
 
     assert response.status_code == status.HTTP_200_OK
-    assert response.json()["message"].startswith("Login successful")
+    assert response.json()["token_type"] == "bearer"
 
 
 def test_login_invalid_password(client, create_test_db):
@@ -116,3 +116,78 @@ def test_login_unknown_email(client):
     response = client.post("/auth/login", json = payload)
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+#################################################################################################
+
+def test_logout_deletes_cookie(client):
+    response = client.post("/auth/logout")
+
+    # The logout endpoint should send a Set-Cookie header that deletes the cookie.
+    set_cookie_header = response.headers.get("set-cookie")
+
+    assert set_cookie_header is not None
+    assert "refresh_token=" in set_cookie_header
+    assert "Max-Age=0" in set_cookie_header or "expires=" in set_cookie_header
+
+    assert response.json()["message"] == "Logged out"
+
+#################################################################################################
+
+def test_refresh_issues_new_access_token(client, test_user, refresh_token_for_test_user):
+    response = client.post(
+        "/auth/refresh",
+        cookies = {"refresh_token": refresh_token_for_test_user}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+
+    assert "access_token" in data
+    assert isinstance(data["access_token"], str)
+    assert len(data["access_token"]) > 0
+
+
+def test_refresh_rotates_refresh_token(
+    client,
+    test_user,
+    refresh_token_for_test_user
+):
+    response = client.post(
+        "/auth/refresh",
+        cookies = {"refresh_token": refresh_token_for_test_user}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    # The refresh endpoint should set a new refresh token cookie.
+    set_cookie_header = response.headers.get("set-cookie")
+
+    # Parse out the new token
+    new_refresh_token = set_cookie_header.split("refresh_token=")[1].split(";")[0]
+
+    assert set_cookie_header is not None
+    assert "refresh_token=" in set_cookie_header
+    # Ensure the new token is different from the old one.
+    assert new_refresh_token != refresh_token_for_test_user
+
+#################################################################################################
+
+def test_me_returns_user_details(client, test_user, access_token_for_test_user):
+    # print("DEBUG: test_user.id:", test_user.id, type(test_user.id))
+    # print("DEBUG: access_token:", access_token_for_test_user)
+
+    response = client.get(
+        "/auth/me",
+        headers = {"Authorization": f"Bearer {access_token_for_test_user}"}
+    )
+
+    # print("DEBUG: response.status_code:", response.status_code)
+    # print("DEBUG: response.text:", response.text)
+
+    data = response.json()
+
+    assert response.status_code == status.HTTP_200_OK
+    assert data["id"] == str(test_user.id)
+    assert data["email"] == test_user.email
+    assert data["created_at"] != ""

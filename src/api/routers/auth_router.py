@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import logging
 from starlette import status
 import sentry_sdk
+import uuid
 
 from src.utils.session_utils import get_session
 from src.db.models.user_models import UserInternalModel
@@ -11,6 +12,7 @@ from src.api.schemas.user_schema import (
     UserOutboundSchema,
     LoginSchema
 )
+from src.api.dependencies.auth_dependencies import get_current_user
 from src.utils.auth.password_utils import (
     hash_password, 
     validate_password_strength,
@@ -23,7 +25,10 @@ from src.utils.auth.jwt_utils import (
     REFRESH_TOKEN_LIFETIME_DAYS,
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
-from src.core.rate_limit.config_rate_limit import VERY_LOW_RATE_LIMIT
+from src.core.rate_limit.config_rate_limit import (
+    LOW_RATE_LIMIT,
+    VERY_LOW_RATE_LIMIT
+)
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
@@ -101,10 +106,7 @@ def signup(
         # Return the UserOutboundSchema
         return new_user
 
-@router.post(
-    "/login",
-    status_code = status.HTTP_200_OK
-)
+@router.post("/login", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def login(
     request: Request,
@@ -168,7 +170,19 @@ def login(
         # return {"message": "Login successful (tokens coming next)"}
 
 
-@router.post("/refresh", status_code = status.HTTP_200_OK)
+@router.post("/logout")
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def logout(
+    request: Request,
+    response: Response
+):
+    response.delete_cookie("refresh_token")
+    return {"message": "Logged out"}
+
+
+@router.post("/refresh", status_code = status.HTTP_200_OK
+)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def refresh_token(
     request: Request,
     response: Response,
@@ -209,7 +223,7 @@ def refresh_token(
             detail = "Invalid token scope."
         )
 
-    user_id = payload.get("sub")
+    user_id = uuid.UUID(payload.get("sub"))
 
     # Ensure the user exists.
     user = session.query(UserInternalModel).filter(
@@ -245,4 +259,29 @@ def refresh_token(
     return {
         "access_token": new_access_token,
         "token_type": "bearer"
+    }
+
+
+@router.get("/me")
+@rate_limiter.limit(LOW_RATE_LIMIT)
+def get_me(
+    request: Request,
+    current_user = Depends(get_current_user)
+):
+    # Protected route that returns information about the 
+    # currently authenticated user, based on their access token.
+    # The frontend should never store user identity in cookies or
+    # local storage. It should always just store an access token and
+    # ask the backend for user details after passing that access
+    # token back.
+    # print("DEBUG: inside /me route")
+    # print("DEBUG: current_user:", current_user)
+    # print("DEBUG: current_user.id:", current_user.id)
+    # print("DEBUG: current_user.email:", current_user.email)
+    # print("DEBUG: current_user.created_at:", current_user.created_at)
+
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "created_at": current_user.created_at
     }

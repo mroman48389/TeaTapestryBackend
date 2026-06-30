@@ -1,4 +1,5 @@
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
@@ -41,10 +42,11 @@ def create_refresh_token(user_id: str) -> str:
     datetime_expired = datetime_now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS)
 
     payload = {
-        "sub": user_id,
-        "scope": "refresh",
-        "iat": int(datetime_now.timestamp()),
-        "exp": int(datetime_expired.timestamp())
+        "sub": user_id,                           # subject (user ID)
+        "scope": "refresh",                       # token type
+        "iat": int(datetime_now.timestamp()),     # issued at
+        "exp": int(datetime_expired.timestamp()), # expiration
+        "jti": str(uuid.uuid4())                  # JWT ID; guarantees uniqueness
     }
 
     token = jwt.encode(payload, JWT_SECRET_KEY, algorithm = JWT_ALGORITHM)
