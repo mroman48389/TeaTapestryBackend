@@ -9,8 +9,13 @@ from src.db.models.user_models import UserInternalModel
 from src.api.schemas.user_schema import (
     UserInboundSchema,
     UserOutboundSchema,
+    LoginSchema
 )
-from src.utils.auth.password_utils import hash_password, validate_password_strength
+from src.utils.auth.password_utils import (
+    hash_password, 
+    validate_password_strength,
+    verify_password
+)
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import VERY_LOW_RATE_LIMIT
 
@@ -89,3 +94,41 @@ def signup(
         
         # Return the UserOutboundSchema
         return new_user
+
+@router.post(
+    "/login",
+    status_code = status.HTTP_200_OK
+)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def login(
+    request: Request,
+    payload: LoginSchema,
+    response: Response,
+    session: Session = Depends(get_session)
+):
+    with sentry_sdk.start_span(op = "auth", name = "login"):
+        sentry_sdk.set_tag("endpoint", "login")
+
+        response.headers["Cache-Control"] = "no-store"
+
+        # Look up the user.
+        user = session.query(UserInternalModel).filter(
+            UserInternalModel.email == payload.email
+        ).first()
+
+        # If they were not found, don't authorize.
+        if not user:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid email or password."
+            )
+
+        # If they were found, verify their password.
+        if not verify_password(payload.password, user.hashed_password):
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid email or password."
+            )
+
+        # Placeholder response (JWTs coming).
+        return {"message": "Login successful (tokens coming next)"}

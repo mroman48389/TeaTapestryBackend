@@ -40,3 +40,8 @@ class UserOutboundSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Mirrors UserInboundSchema, but separate for clarity.
+class LoginSchema(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length = 8)

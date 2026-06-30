@@ -11,6 +11,7 @@ from src.app.main import app
 from src.db.base import Base
 # SQLAlchemy only creates tables for models that have been imported into memory. 
 from src.db.models.tea_profiles_model import TeaProfileModel 
+from src.db.models.user_models import UserInternalModel # noqa: F401
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.constants.model_metadata_constants import DELIMITER_VALUE
@@ -67,7 +68,7 @@ def create_test_db():
 
 @pytest.fixture
 def client(create_test_db):
-    # Override FastAPI's DB dependency so routes use the test DB.
+    # Override FastAPI's DB dependency so routes use the test DB. 
     def override_get_session():
         try:
             yield create_test_db

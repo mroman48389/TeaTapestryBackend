@@ -1,7 +1,7 @@
 from starlette import status
 
 from src.db.models.user_models import UserInternalModel
-from src.utils.auth.password_utils import verify_password
+from src.utils.auth.password_utils import verify_password, hash_password
 
 def test_signup_creates_user(client, create_test_db):
     payload = {
@@ -56,3 +56,63 @@ def test_signup_hashes_password(client, create_test_db):
     assert user is not None
     assert user.hashed_password != payload["password"]
     assert verify_password(payload["password"], user.hashed_password)
+
+#################################################################################################
+
+def test_login_success(client, create_test_db):
+    # Create and add a user. 
+    # 
+    # NOTE: the domain gets normalized by EmailStr to all lowercase, so do NOT include
+    # uppercase letters in the domain name or the tests will fail!
+    user = UserInternalModel(
+        email = "someUsername@somedomain.com",
+        hashed_password = hash_password("MyPassword@123")
+    )
+    create_test_db.add(user)
+    create_test_db.commit()
+
+    print(create_test_db.query(UserInternalModel).all())
+
+    # Log in with the same email and password.
+    payload = {
+        "email": "someUsername@somedomain.com",
+        "password": "MyPassword@123"
+    }
+
+    response = client.post("/auth/login", json = payload)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["message"].startswith("Login successful")
+
+
+def test_login_invalid_password(client, create_test_db):
+    # Create and add a user.
+    user = UserInternalModel(
+        email = "someUsername@somedomain.com",
+        hashed_password = hash_password("MyPassword@123")
+    )
+    create_test_db.add(user)
+    create_test_db.commit()
+
+    # Try to log in with the same email but the wrong password.
+    payload = {
+        "email": "someUsername@somedomain.com",
+        "password": "WrongPassword@123"
+    }
+
+    response = client.post("/auth/login", json = payload)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Invalid email or password" in response.json()["detail"]
+
+
+def test_login_unknown_email(client):
+    # Try to log in with an account that doesn't exist in the database.
+    payload = {
+        "email": "someUsername@somedomain.com",
+        "password": "MyPassword@123"
+    }
+
+    response = client.post("/auth/login", json = payload)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
