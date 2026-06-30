@@ -16,6 +16,12 @@ from src.utils.auth.password_utils import (
     validate_password_strength,
     verify_password
 )
+from src.utils.auth.jwt_utils import (
+    create_access_token,
+    create_refresh_token, 
+    decode_token,
+    REFRESH_TOKEN_LIFETIME_DAYS,
+)
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import VERY_LOW_RATE_LIMIT
 
@@ -130,5 +136,113 @@ def login(
                 detail = "Invalid email or password."
             )
 
+        # Generate tokens.
+        access_token = create_access_token(str(user.id))
+        refresh_token = create_refresh_token(str(user.id))
+
+        # Determine cookie security based on environment. Allows us to ignore
+        # secure cookies, which do not work over http (we run locally over http and
+        # production over https).
+        hostname = request.url.hostname
+        is_local = hostname in ("localhost", "127.0.0.1")
+
+        # Set refresh token cookie. max_age is the number of seconds the browser 
+        # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
+        # (60 sec / min)
+        response.set_cookie(
+            key = "refresh_token",
+            value = refresh_token,
+            httponly = True,
+            secure = not is_local,
+            samesite = "strict",
+            max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
+        )
+
+        # Return access token
+        return {
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+
         # Placeholder response (JWTs coming).
-        return {"message": "Login successful (tokens coming next)"}
+        # return {"message": "Login successful (tokens coming next)"}
+
+
+@router.post("/refresh", status_code = status.HTTP_200_OK)
+def refresh_token(
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session)
+):
+    # When the access token expires after about 15 minutes on the frontend, it
+    # can call this endpoint to read the refresh token from the HttpOnly cookie.
+    # We'll decode and validate it, ensure the scope is "refresh", and issue a 
+    # new access token (returned as JSON).
+    #
+    # Refresh tokens live in cookies because cookies persist across browser restarts
+    # and page reloads. Since they are HttpOnly, JavaScript can't be used to steal
+    # them. They have CSRF (cross-site request forgery) protection, since they are 
+    # SameSite strict.
+
+    # Make sure the refresh token is in the cookie.
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Missing refresh token."
+        )
+
+    # Decode and validate the refresh token.
+    try:
+        payload = decode_token(refresh_token)
+
+    except Exception:
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Invalid or expired refresh token."
+        )
+
+    # Ensure the token is a refresh token.
+    if payload.get("scope") != "refresh":
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Invalid token scope."
+        )
+
+    user_id = payload.get("sub")
+
+    # Ensure the user exists.
+    user = session.query(UserInternalModel).filter(
+        UserInternalModel.id == user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "User no longer exists."
+        )
+
+    # Issue a new access token.
+    new_access_token = create_access_token(str(user.id))
+
+    # Issue a new refresh token (rotate the token). Prevents stolen 
+    # refresh tokens from being reused.
+    new_refresh_token = create_refresh_token(str(user.id))
+
+    hostname = request.url.hostname
+    is_local = hostname in ("localhost", "127.0.0.1")
+
+    response.set_cookie(
+        key = "refresh_token",
+        value = new_refresh_token,
+        httponly = True,
+        secure = not is_local,
+        samesite = "strict",
+        max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
+    )
+
+    # Return a new access token.
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer"
+    }
