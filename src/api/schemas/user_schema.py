@@ -8,6 +8,12 @@ from uuid import UUID
 class UserInternalSchema(BaseModel):
     id: UUID
     email: EmailStr
+    display_name: str = Field(
+        min_length = 1,
+        max_length = 30,
+        pattern = r"^[A-Za-z0-9\-\s]+$"
+    )
+
     hashed_password: str
     created_at: datetime
     updated_at: datetime
@@ -25,6 +31,12 @@ class UserInboundSchema(BaseModel):
     # EmailStr has built-in email validation. 
     email: EmailStr
     password: str = Field(min_length = 8)
+    display_name: str = Field(
+        min_length = 1,
+        max_length = 30,
+        pattern = r"^[A-Za-z0-9\-\s]+$"
+    )
+
 
 # Exposed to the client. Public API contract used when the API returns a user object 
 # to the frontend. This should be used when returning a new user after they sign up, 
@@ -36,6 +48,12 @@ class UserInboundSchema(BaseModel):
 class UserOutboundSchema(BaseModel):
     id: UUID
     email: EmailStr
+    display_name: str = Field(
+        min_length = 1,
+        max_length = 30,
+        pattern = r"^[A-Za-z0-9\-\s]+$"
+    )
+
     created_at: datetime
 
     class Config:

@@ -33,6 +33,11 @@ class UserInternalModel(Base):
         nullable = False,
     )
 
+    display_name: Mapped[str] = mapped_column(
+        String,
+        nullable = False,
+    )
+
     # DateTime(timezone = True) and datetime.now(timezone.utc) give us 
     # timezone-aware UTC timestamps.
     #

@@ -6,7 +6,8 @@ from src.utils.auth.password_utils import verify_password, hash_password
 def test_signup_creates_user(client, create_test_db):
     payload = {
         "email": "someUser@gmail.com",
-        "password": "MyPassword@123"
+        "password": "MyPassword@123",
+        "display_name": "Some User"
     }
 
     response = client.post("/auth/signup", json = payload)
@@ -30,7 +31,8 @@ def test_signup_creates_user(client, create_test_db):
 def test_signup_duplicate_email_rejected(client, create_test_db):
     payload = {
         "email": "someUser@gmail.com",
-        "password": "MyPassword@123"
+        "password": "MyPassword@123",
+        "display_name": "Some User"
     }
 
     # Sign up once.
@@ -46,7 +48,8 @@ def test_signup_duplicate_email_rejected(client, create_test_db):
 def test_signup_hashes_password(client, create_test_db):
     payload = {
         "email": "someUser@gmail.com",
-        "password": "MyPassword@123"
+        "password": "MyPassword@123",
+        "display_name": "Some User"
     }
 
     client.post("/auth/signup", json = payload)
@@ -66,7 +69,8 @@ def test_login_success(client, create_test_db):
     # uppercase letters in the domain name or the tests will fail!
     user = UserInternalModel(
         email = "someUsername@somedomain.com",
-        hashed_password = hash_password("MyPassword@123")
+        hashed_password = hash_password("MyPassword@123"),
+        display_name = "Some User"
     )
     create_test_db.add(user)
     create_test_db.commit()
@@ -82,14 +86,14 @@ def test_login_success(client, create_test_db):
     response = client.post("/auth/login", json = payload)
 
     assert response.status_code == status.HTTP_200_OK
-    assert response.json()["token_type"] == "bearer"
 
 
 def test_login_invalid_password(client, create_test_db):
     # Create and add a user.
     user = UserInternalModel(
         email = "someUsername@somedomain.com",
-        hashed_password = hash_password("MyPassword@123")
+        hashed_password = hash_password("MyPassword@123"),
+        display_name = "Some User"
     )
     create_test_db.add(user)
     create_test_db.commit()
@@ -141,11 +145,9 @@ def test_refresh_issues_new_access_token(client, test_user, refresh_token_for_te
 
     assert response.status_code == status.HTTP_200_OK
 
-    data = response.json()
+    set_cookie_header = response.headers.get("set-cookie")
+    assert "access_token=" in set_cookie_header
 
-    assert "access_token" in data
-    assert isinstance(data["access_token"], str)
-    assert len(data["access_token"]) > 0
 
 
 def test_refresh_rotates_refresh_token(
@@ -179,7 +181,7 @@ def test_me_returns_user_details(client, test_user, access_token_for_test_user):
 
     response = client.get(
         "/auth/me",
-        headers = {"Authorization": f"Bearer {access_token_for_test_user}"}
+        cookies = {"access_token": access_token_for_test_user}
     )
 
     # print("DEBUG: response.status_code:", response.status_code)

@@ -177,7 +177,8 @@ def create_test_csv(tmp_path):
 def test_user(create_test_db):
     user = UserInternalModel(
         email = "testUser@testdomain.com",
-        hashed_password = hash_password("TestPassword@123") 
+        hashed_password = hash_password("TestPassword@123"),
+        display_name = "Test User"
     )
 
     create_test_db.add(user)

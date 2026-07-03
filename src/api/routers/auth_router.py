@@ -23,6 +23,7 @@ from src.utils.auth.jwt_utils import (
     create_refresh_token, 
     decode_token,
     REFRESH_TOKEN_LIFETIME_DAYS,
+    ACCESS_TOKEN_LIFETIME_MINUTES,
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import (
@@ -84,6 +85,7 @@ def signup(
         new_user = UserInternalModel(
             email = payload.email,
             hashed_password = hashed_pw,
+            display_name = payload.display_name,
         )
 
         try:
@@ -156,8 +158,19 @@ def login(
             value = refresh_token,
             httponly = True,
             secure = not is_local,
-            samesite = "strict",
+            samesite = "lax",
+            path = "/",
             max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
+        )
+
+        response.set_cookie(
+            key = "access_token",
+            value = access_token,
+            httponly = True,
+            secure = not is_local,
+            samesite = "lax",
+            path = "/",
+            max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )
 
         # Return access token
@@ -176,7 +189,22 @@ def logout(
     request: Request,
     response: Response
 ):
-    response.delete_cookie("refresh_token")
+    hostname = request.url.hostname
+    is_local = hostname in ("localhost", "127.0.0.1")
+
+    response.delete_cookie(
+        key = "refresh_token",
+        path = "/",
+        secure = not is_local,
+        samesite = "lax"
+    )
+    response.delete_cookie(
+        key = "access_token",
+        path = "/",
+        secure = not is_local,
+        samesite = "lax"
+    )
+
     return {"message": "Logged out"}
 
 
@@ -251,8 +279,19 @@ def refresh_token(
         value = new_refresh_token,
         httponly = True,
         secure = not is_local,
-        samesite = "strict",
+        samesite = "lax",
+        path = "/",
         max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
+    )
+
+    response.set_cookie(
+        key = "access_token",
+        value = new_access_token,
+        httponly = True,
+        secure = not is_local,
+        samesite = "lax",
+        path = "/",
+        max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
     )
 
     # Return a new access token.
@@ -269,16 +308,9 @@ def get_me(
     current_user = Depends(get_current_user)
 ):
     # Protected route that returns information about the 
-    # currently authenticated user, based on their access token.
-    # The frontend should never store user identity in cookies or
-    # local storage. It should always just store an access token and
-    # ask the backend for user details after passing that access
-    # token back.
-    # print("DEBUG: inside /me route")
-    # print("DEBUG: current_user:", current_user)
-    # print("DEBUG: current_user.id:", current_user.id)
-    # print("DEBUG: current_user.email:", current_user.email)
-    # print("DEBUG: current_user.created_at:", current_user.created_at)
+    # currently authenticated user, based on the access token cookie.
+    # The frontend does not store tokens; the browser sends cookies 
+    # automatically, and the backend derives identity from them.
 
     return {
         "id": current_user.id,

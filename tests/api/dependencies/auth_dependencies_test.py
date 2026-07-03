@@ -5,7 +5,7 @@ from src.utils.auth.jwt_utils import create_refresh_token
 def test_get_current_user_valid(client, test_user, access_token_for_test_user):
     response = client.get(
         "/auth/me",
-        headers = {"Authorization": f"Bearer {access_token_for_test_user}"}
+        cookies = {"access_token": access_token_for_test_user}
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["id"] == str(test_user.id)
@@ -14,7 +14,7 @@ def test_get_current_user_valid(client, test_user, access_token_for_test_user):
 def test_get_current_user_invalid_token(client):
     response = client.get(
         "/auth/me",
-        headers = {"Authorization": "Bearer not_a_real_token"}
+        cookies = {"access_token": "invalid_token"}
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -24,7 +24,7 @@ def test_get_current_user_wrong_scope(client, test_user):
 
     response = client.get(
         "/auth/me",
-        headers = {"Authorization": f"Bearer {refresh_token}"}
+        cookies = {"access_token": refresh_token}
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -32,7 +32,7 @@ def test_get_current_user_wrong_scope(client, test_user):
 def test_get_current_user_missing_token(client):
     response = client.get("/auth/me")
     
-    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 def test_get_current_user_user_deleted(
@@ -46,7 +46,7 @@ def test_get_current_user_user_deleted(
 
     response = client.get(
         "/auth/me",
-        headers = {"Authorization": f"Bearer {access_token_for_test_user}"}
+        cookies = {"access_token": access_token_for_test_user}
     )
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
