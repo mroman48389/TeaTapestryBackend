@@ -51,7 +51,10 @@ def signup(
     session: Session = Depends(get_session)
 ):
     # We'll employ strict rate limiting (no reason to allow more than a few attempts 
-    # a minute), and top-level Sentry observability.  
+    # a minute), and top-level Sentry observability. The Sentry spans are purposefully
+    # done a little differently for auth endpoints, since auth is critical and we want
+    # to monitor it separately. The version below is auth-first rather than 
+    # endpoint-first as a result. 
     # 
     # Etags, last-modified/cahce-control headers, head endpoints, and caching range 
     # from not applicable to harmful here. Sensitive information should never be
@@ -189,23 +192,26 @@ def logout(
     request: Request,
     response: Response
 ):
-    hostname = request.url.hostname
-    is_local = hostname in ("localhost", "127.0.0.1")
+    with sentry_sdk.start_span(op = "auth", name = "logout"):
+        sentry_sdk.set_tag("endpoint", "logout")
+        
+        hostname = request.url.hostname
+        is_local = hostname in ("localhost", "127.0.0.1")
 
-    response.delete_cookie(
-        key = "refresh_token",
-        path = "/",
-        secure = not is_local,
-        samesite = "lax"
-    )
-    response.delete_cookie(
-        key = "access_token",
-        path = "/",
-        secure = not is_local,
-        samesite = "lax"
-    )
+        response.delete_cookie(
+            key = "refresh_token",
+            path = "/",
+            secure = not is_local,
+            samesite = "lax"
+        )
+        response.delete_cookie(
+            key = "access_token",
+            path = "/",
+            secure = not is_local,
+            samesite = "lax"
+        )
 
-    return {"message": "Logged out"}
+        return {"message": "Logged out"}
 
 
 @router.post("/refresh", status_code = status.HTTP_200_OK
@@ -216,89 +222,92 @@ def refresh_token(
     response: Response,
     session: Session = Depends(get_session)
 ):
-    # When the access token expires after about 15 minutes on the frontend, it
-    # can call this endpoint to read the refresh token from the HttpOnly cookie.
-    # We'll decode and validate it, ensure the scope is "refresh", and issue a 
-    # new access token (returned as JSON).
-    #
-    # Refresh tokens live in cookies because cookies persist across browser restarts
-    # and page reloads. Since they are HttpOnly, JavaScript can't be used to steal
-    # them. They have CSRF (cross-site request forgery) protection, since they are 
-    # SameSite strict.
+    with sentry_sdk.start_span(op = "auth", name = "refresh_token"):
+        sentry_sdk.set_tag("endpoint", "refresh_token")
 
-    # Make sure the refresh token is in the cookie.
-    refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(
-            status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "Missing refresh token."
+        # When the access token expires after about 15 minutes on the frontend, it
+        # can call this endpoint to read the refresh token from the HttpOnly cookie.
+        # We'll decode and validate it, ensure the scope is "refresh", and issue a 
+        # new access token (returned as JSON).
+        #
+        # Refresh tokens live in cookies because cookies persist across browser restarts
+        # and page reloads. Since they are HttpOnly, JavaScript can't be used to steal
+        # them. They have CSRF (cross-site request forgery) protection, since they are 
+        # SameSite strict.
+
+        # Make sure the refresh token is in the cookie.
+        refresh_token = request.cookies.get("refresh_token")
+        if not refresh_token:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Missing refresh token."
+            )
+
+        # Decode and validate the refresh token.
+        try:
+            payload = decode_token(refresh_token)
+
+        except Exception:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid or expired refresh token."
+            )
+
+        # Ensure the token is a refresh token.
+        if payload.get("scope") != "refresh":
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid token scope."
+            )
+
+        user_id = uuid.UUID(payload.get("sub"))
+
+        # Ensure the user exists.
+        user = session.query(UserInternalModel).filter(
+            UserInternalModel.id == user_id
+        ).first()
+
+        if not user:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "User no longer exists."
+            )
+
+        # Issue a new access token.
+        new_access_token = create_access_token(str(user.id))
+
+        # Issue a new refresh token (rotate the token). Prevents stolen 
+        # refresh tokens from being reused.
+        new_refresh_token = create_refresh_token(str(user.id))
+
+        hostname = request.url.hostname
+        is_local = hostname in ("localhost", "127.0.0.1")
+
+        response.set_cookie(
+            key = "refresh_token",
+            value = new_refresh_token,
+            httponly = True,
+            secure = not is_local,
+            samesite = "lax",
+            path = "/",
+            max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
         )
 
-    # Decode and validate the refresh token.
-    try:
-        payload = decode_token(refresh_token)
-
-    except Exception:
-        raise HTTPException(
-            status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "Invalid or expired refresh token."
+        response.set_cookie(
+            key = "access_token",
+            value = new_access_token,
+            httponly = True,
+            secure = not is_local,
+            samesite = "lax",
+            path = "/",
+            max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )
 
-    # Ensure the token is a refresh token.
-    if payload.get("scope") != "refresh":
-        raise HTTPException(
-            status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "Invalid token scope."
-        )
-
-    user_id = uuid.UUID(payload.get("sub"))
-
-    # Ensure the user exists.
-    user = session.query(UserInternalModel).filter(
-        UserInternalModel.id == user_id
-    ).first()
-
-    if not user:
-        raise HTTPException(
-            status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "User no longer exists."
-        )
-
-    # Issue a new access token.
-    new_access_token = create_access_token(str(user.id))
-
-    # Issue a new refresh token (rotate the token). Prevents stolen 
-    # refresh tokens from being reused.
-    new_refresh_token = create_refresh_token(str(user.id))
-
-    hostname = request.url.hostname
-    is_local = hostname in ("localhost", "127.0.0.1")
-
-    response.set_cookie(
-        key = "refresh_token",
-        value = new_refresh_token,
-        httponly = True,
-        secure = not is_local,
-        samesite = "lax",
-        path = "/",
-        max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
-    )
-
-    response.set_cookie(
-        key = "access_token",
-        value = new_access_token,
-        httponly = True,
-        secure = not is_local,
-        samesite = "lax",
-        path = "/",
-        max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
-    )
-
-    # Return a new access token.
-    return {
-        "access_token": new_access_token,
-        "token_type": "bearer"
-    }
+        # Return a new access token.
+        return {
+            "access_token": new_access_token,
+            "token_type": "bearer"
+        }
 
 
 @router.get("/me")
@@ -307,13 +316,16 @@ def get_me(
     request: Request,
     current_user = Depends(get_current_user)
 ):
-    # Protected route that returns information about the 
-    # currently authenticated user, based on the access token cookie.
-    # The frontend does not store tokens; the browser sends cookies 
-    # automatically, and the backend derives identity from them.
+    with sentry_sdk.start_span(op = "auth", name = "get_me"):
+        sentry_sdk.set_tag("endpoint", "get_me")
 
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "created_at": current_user.created_at
-    }
+        # Protected route that returns information about the 
+        # currently authenticated user, based on the access token cookie.
+        # The frontend does not store tokens; the browser sends cookies 
+        # automatically, and the backend derives identity from them.
+
+        return {
+            "id": current_user.id,
+            "email": current_user.email,
+            "created_at": current_user.created_at
+        }

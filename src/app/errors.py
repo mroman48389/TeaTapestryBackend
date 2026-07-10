@@ -23,6 +23,7 @@ class DomainError(Exception):
         self.message = message
         self.details = details or {}
 
+#########################################################################################
 
 class TeaProfileNotFoundError(DomainError):
     """Raised when a tea profile cannot be found."""
@@ -38,3 +39,11 @@ class TeaProfileConflictError(DomainError):
 
 class TeaProfileQueryError(DomainError):
     """Raised when a query for tea profiles fails unexpectedly."""
+
+#########################################################################################
+
+class UserTeaProfileNotesNotFoundError(DomainError):
+    """Raised when user tea profile notes cannot be found."""
+
+class UserTeaProfileNotesQueryError(DomainError):
+    """Raised when a query for user tea profile notes fails unexpectedly."""

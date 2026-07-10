@@ -1,3 +1,6 @@
+# Mixes Layer 1 (API / route) and Layer 2 (service), since these endpoints are
+# read-heavy, cache-heavy, public (no auth), and support a variety of things
+# like etags, last-modified, and HEAD requests. 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 from typing import List, get_origin, get_args, Union, cast, Any
@@ -219,7 +222,9 @@ async def _get_tea_profiles_common(
     response_model = List[TeaProfileSchema], 
     responses = COMMON_RESPONSES # type: ignore
 )
-@router.get("/", response_model = List[TeaProfileSchema], 
+@router.get(
+    "/", 
+    response_model = List[TeaProfileSchema], 
     responses = COMMON_RESPONSES # type: ignore
 )
 @rate_limiter.limit(LOW_RATE_LIMIT)
@@ -368,7 +373,9 @@ async def _get_tea_profile_common(
             return cached_value
 
 
-@router.get("/{tea_profile_id}", response_model = TeaProfileSchema, 
+@router.get(
+    "/{tea_profile_id}", 
+    response_model = TeaProfileSchema, 
     responses = COMMON_RESPONSES # type: ignore
 )
 @rate_limiter.limit(HIGH_RATE_LIMIT)
@@ -382,7 +389,8 @@ async def get_tea_profile(
         request, response, tea_profile_id, session, head_only = False
     )
 
-@router.head("/{tea_profile_id}", 
+@router.head(
+    "/{tea_profile_id}", 
     summary = "HEAD version of get_tea_profile",
     include_in_schema = True, # FastAPI does not autodocument HEADs.
     responses = COMMON_RESPONSES # type: ignore

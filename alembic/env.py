@@ -15,6 +15,7 @@ import configparser
 # Import models so Alembic sees them
 from src.db.models.user_models import UserInternalModel # noqa: F401
 from src.db.models.tea_profiles_model import TeaProfileModel # noqa: F401
+from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel # noqa: F401
 
 # Disable interpolation globally for Alembic's config parser
 configparser.BasicInterpolation = None

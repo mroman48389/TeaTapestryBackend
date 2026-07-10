@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from src.app.health_services import HealthService
+from src.app.services.health_services import HealthService
 from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 

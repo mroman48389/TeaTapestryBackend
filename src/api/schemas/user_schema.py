@@ -37,6 +37,10 @@ class UserInboundSchema(BaseModel):
         pattern = r"^[A-Za-z0-9\-\s]+$"
     )
 
+    # Prevent client from adding extra fields.
+    class Config:
+        extra = "forbid"
+
 
 # Exposed to the client. Public API contract used when the API returns a user object 
 # to the frontend. This should be used when returning a new user after they sign up, 
@@ -63,3 +67,7 @@ class UserOutboundSchema(BaseModel):
 class LoginSchema(BaseModel):
     email: EmailStr
     password: str = Field(min_length = 8)
+
+    # Prevent client from adding extra fields.
+    class Config:
+        extra = "forbid"
