@@ -1,11 +1,12 @@
 from src.cache.simple_cache import cache
+from src.constants.route_constants import DEBUG_CACHE_PREFIX
 
 def test_debug_cache_endpoint(client):
     # Prime the cache with something
 
     cache.set("test_key", {"hello": "world"})
 
-    response = client.get("/debug/cache")
+    response = client.get(DEBUG_CACHE_PREFIX)
     assert response.status_code == 200
 
     data = response.json()

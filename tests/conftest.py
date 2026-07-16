@@ -12,11 +12,14 @@ from src.db.base import Base
 # SQLAlchemy only creates tables for models that have been imported into memory. 
 from src.db.models.tea_profiles_model import TeaProfileModel 
 from src.db.models.user_models import UserInternalModel # noqa: F401
+from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.utils.auth.password_utils import hash_password
 from src.utils.auth.jwt_utils import create_access_token, create_refresh_token
+from tests.utils.test_utils import get_empty_user_tea_profile_notes_body
 from src.constants.model_metadata_constants import DELIMITER_VALUE
+
 
 # Mark the process as a pytest run. The application checks this flag to skip 
 # production startup logicsuch as creating real database tables or connecting 
@@ -90,7 +93,7 @@ def client(create_test_db):
 
 @pytest.fixture
 def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
-    obj = create_test_db.query(TeaProfileModel).filter_by(name="Long Jing").first()
+    obj = create_test_db.query(TeaProfileModel).filter_by(name = "Long Jing").first()
     return obj.id
 
 @pytest.fixture
@@ -117,6 +120,23 @@ def seed_tea_profiles(create_test_db):
         wet_leaf_aroma=["fresh"]
     ))
     create_test_db.commit()
+
+@pytest.fixture
+def seed_user_tea_profile_notes(create_test_db, test_user, long_jing_tea_profile_id):
+    body = get_empty_user_tea_profile_notes_body()
+
+    user_tea_profile_notes = UserTeaProfileNotesModel(
+        user_id = test_user.id,
+        tea_profile_id = long_jing_tea_profile_id,
+        **body
+    )
+
+    create_test_db.add(user_tea_profile_notes)
+    create_test_db.commit()
+    create_test_db.refresh(user_tea_profile_notes)
+
+    return user_tea_profile_notes
+
 
 @pytest.fixture
 # Note that while we can rename fixture functions, you CANNOT rename fixture

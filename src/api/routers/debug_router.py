@@ -2,10 +2,11 @@ import time
 from fastapi import APIRouter
 
 from src.cache.simple_cache import cache  # adjust import if needed
+from src.constants.route_constants import DEBUG_CACHE_PREFIX
 
 router = APIRouter()
 
-@router.get("/debug/cache")
+@router.get(DEBUG_CACHE_PREFIX)
 def debug_cache():
     ''' Returns observability metrics for cache. '''
     now = time.time()

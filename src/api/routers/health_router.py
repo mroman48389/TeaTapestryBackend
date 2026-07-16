@@ -3,6 +3,10 @@ from fastapi import APIRouter, Request
 from src.app.services.health_services import HealthService
 from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
 from src.core.rate_limit.setup_rate_limit import rate_limiter
+from src.constants.route_constants import (
+    HEALTH_PREFIX,
+    CONNECTIONS
+)
 
 import logging
 
@@ -11,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Define group of routes with health as their base path and health
 # for documentation grouping.
-router = APIRouter(prefix = "/health", tags = ["health"])
+router = APIRouter(prefix = HEALTH_PREFIX, tags = ["health"])
 
 health_service = HealthService()
 
@@ -21,7 +25,7 @@ async def health(request: Request):
     # Basic smoke test to tell us if the app is reachable at all.
     return {"status": "ok"}
     
-@router.get("/connections")
+@router.get(f"/{CONNECTIONS}")
 @rate_limiter.limit(LOW_RATE_LIMIT)
 async def health_connections(request: Request):
     # Smoke test to tell us if resources are reachable.

@@ -12,6 +12,7 @@ from uuid import UUID
 from src.app.errors import (
     UserTeaProfileNotesNotFoundError,
     UserTeaProfileNotesQueryError,
+    UserTeaProfileNotesAlreadyExistError
 )
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel 
 from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
@@ -133,6 +134,21 @@ class UserTeaProfileNotesRepository:
     ) -> UserTeaProfileNotesModel:
         
         try:
+            # Before creating the notes, make sure they don't already exist for the 
+            # specified user and tea profile ids. If they do, raise a domain 
+            # exception.
+            existing_notes = (
+                self._session.query(UserTeaProfileNotesModel)
+                .filter_by(user_id = user_id, tea_profile_id = tea_profile_id)
+                .one_or_none()
+            )
+
+            if existing_notes is not None:
+                raise UserTeaProfileNotesAlreadyExistError(
+                    f"User tea profile notes already exist for "
+                    f"tea_profile_id = {tea_profile_id} and user_id = {user_id}"
+                )
+
             # Create a new SQLAlchemy ORM object (instance of a database row) using
             # the user_id from the authenticated user and the tea_profile_id from the
             # route parameter for security. Everything else can come from the JSON the
@@ -150,6 +166,10 @@ class UserTeaProfileNotesRepository:
             self._session.refresh(user_tea_profile_notes)
 
             return user_tea_profile_notes
+
+        except UserTeaProfileNotesAlreadyExistError:
+            # Let the service layer handle this.
+            raise
 
         except SQLAlchemyError as exc:
             self._session.rollback()

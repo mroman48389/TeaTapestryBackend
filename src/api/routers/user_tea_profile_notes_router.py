@@ -24,11 +24,12 @@ from src.core.rate_limit.config_rate_limit import (
     VERY_LOW_RATE_LIMIT
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
+from src.constants.route_constants import USER_TEA_PROFILE_NOTES_PREFIX
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix = "/api/v1/user_tea_profile_notes", tags = ["user_tea_profile_notes"])
+router = APIRouter(prefix = USER_TEA_PROFILE_NOTES_PREFIX, tags = ["user_tea_profile_notes"])
 
 
 def _get_service(session: Session) -> UserTeaProfileNotesService:

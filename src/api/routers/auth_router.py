@@ -30,16 +30,25 @@ from src.core.rate_limit.config_rate_limit import (
     LOW_RATE_LIMIT,
     VERY_LOW_RATE_LIMIT
 )
+from src.constants.route_constants import (
+    AUTH,
+    AUTH_PREFIX,
+    SIGN_UP,
+    LOGIN,
+    LOGOUT,
+    REFRESH,
+    ME
+)
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
 
 # Define group of routes with auth as their base path for documentation grouping.
-router = APIRouter(prefix = "/auth", tags = ["auth"])
+router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
 
 # request param is required by SlowAPI. Without it, we'll get an exception.
 @router.post(
-    "/signup", 
+    f"/{SIGN_UP}", 
     response_model = UserOutboundSchema, 
     status_code = status.HTTP_201_CREATED
 )
@@ -60,7 +69,7 @@ def signup(
     # from not applicable to harmful here. Sensitive information should never be
     # cached, and we are dealing with a POST, not a GET.
     #
-    with sentry_sdk.start_span(op = "auth", name = "signup"):
+    with sentry_sdk.start_span(op = AUTH, name = "signup"):
         sentry_sdk.set_tag("endpoint", "signup")
 
         # Prevent caching of sensitive auth responses
@@ -111,7 +120,8 @@ def signup(
         # Return the UserOutboundSchema
         return new_user
 
-@router.post("/login", status_code = status.HTTP_200_OK)
+
+@router.post(f"/{LOGIN}", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def login(
     request: Request,
@@ -119,7 +129,7 @@ def login(
     response: Response,
     session: Session = Depends(get_session)
 ):
-    with sentry_sdk.start_span(op = "auth", name = "login"):
+    with sentry_sdk.start_span(op = AUTH, name = "login"):
         sentry_sdk.set_tag("endpoint", "login")
 
         response.headers["Cache-Control"] = "no-store"
@@ -186,13 +196,13 @@ def login(
         # return {"message": "Login successful (tokens coming next)"}
 
 
-@router.post("/logout")
+@router.post(f"/{LOGOUT}")
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def logout(
     request: Request,
     response: Response
 ):
-    with sentry_sdk.start_span(op = "auth", name = "logout"):
+    with sentry_sdk.start_span(op = AUTH, name = "logout"):
         sentry_sdk.set_tag("endpoint", "logout")
         
         hostname = request.url.hostname
@@ -214,7 +224,7 @@ def logout(
         return {"message": "Logged out"}
 
 
-@router.post("/refresh", status_code = status.HTTP_200_OK
+@router.post(f"/{REFRESH}", status_code = status.HTTP_200_OK
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def refresh_token(
@@ -222,7 +232,7 @@ def refresh_token(
     response: Response,
     session: Session = Depends(get_session)
 ):
-    with sentry_sdk.start_span(op = "auth", name = "refresh_token"):
+    with sentry_sdk.start_span(op = AUTH, name = "refresh_token"):
         sentry_sdk.set_tag("endpoint", "refresh_token")
 
         # When the access token expires after about 15 minutes on the frontend, it
@@ -310,13 +320,13 @@ def refresh_token(
         }
 
 
-@router.get("/me")
+@router.get(f"/{ME}")
 @rate_limiter.limit(LOW_RATE_LIMIT)
 def get_me(
     request: Request,
     current_user = Depends(get_current_user)
 ):
-    with sentry_sdk.start_span(op = "auth", name = "get_me"):
+    with sentry_sdk.start_span(op = AUTH, name = "get_me"):
         sentry_sdk.set_tag("endpoint", "get_me")
 
         # Protected route that returns information about the 

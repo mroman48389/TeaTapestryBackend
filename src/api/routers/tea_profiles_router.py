@@ -18,13 +18,16 @@ from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.cache.simple_cache import cache, CacheEntry
 from src.utils.etag_utils import generate_etag
 from src.utils.date_utils import http_date
+from src.constants.route_constants import (
+    TEA_PROFILES_PREFIX
+)
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
 
 # Define group of routes with api/tea_profiles as their base path and tea_profiles
 # for documentation grouping.
-router = APIRouter(prefix = "/api/v1/tea_profiles", tags = ["tea_profiles"])
+router = APIRouter(prefix = TEA_PROFILES_PREFIX, tags = ["tea_profiles"])
 
 # Custom FastAPI dependency so that we can set up TeaProfileFilters as a query
 # rather than a body in out route below. Looks at the query string of an incoming

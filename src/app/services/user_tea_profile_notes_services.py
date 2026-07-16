@@ -18,6 +18,7 @@ from src.api.schemas.user_tea_profile_notes_schema import (
 from src.app.errors import (
     UserTeaProfileNotesNotFoundError,
     UserTeaProfileNotesQueryError,
+    UserTeaProfileNotesAlreadyExistError
 )
 
 class UserTeaProfileNotesService:
@@ -31,7 +32,9 @@ class UserTeaProfileNotesService:
     ) -> UserTeaProfileNotesOutboundSchema:
 
         try:
-            user_tea_profile_notes = self._repo.get_by_user_and_tea_profile_id(user_id, tea_profile_id)
+            user_tea_profile_notes = self._repo.get_by_user_and_tea_profile_id(
+                user_id, tea_profile_id
+            )
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
         except UserTeaProfileNotesNotFoundError:
@@ -72,7 +75,13 @@ class UserTeaProfileNotesService:
             user_tea_profile_notes = self._repo.create(user_id, tea_profile_id, inbound_schema)
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
-        except UserTeaProfileNotesQueryError as exc:
+        except UserTeaProfileNotesAlreadyExistError:
+            raise HTTPException(
+                status_code = status.HTTP_409_CONFLICT,
+                detail = "User tea profile notes already exist for this tea profile id."
+            )
+
+        except UserTeaProfileNotesQueryError:
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to create user tea profile notes.",

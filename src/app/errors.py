@@ -47,3 +47,6 @@ class UserTeaProfileNotesNotFoundError(DomainError):
 
 class UserTeaProfileNotesQueryError(DomainError):
     """Raised when a query for user tea profile notes fails unexpectedly."""
+
+class UserTeaProfileNotesAlreadyExistError(DomainError):
+    """Raised when trying to create notes that already exist."""

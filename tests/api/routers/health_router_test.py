@@ -1,16 +1,21 @@
 from starlette import status
 
+from src.constants.route_constants import (
+    HEALTH_PREFIX,
+    HEALTH_CONNECTIONS_PREFIX
+)
+
 def test_health_root(client):
-    response = client.get("/health")
+    response = client.get(HEALTH_PREFIX)
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {"status": "ok"}
 
 def test_health_connections(client):
-    response = client.get("/health/connections")
+    response = client.get(HEALTH_CONNECTIONS_PREFIX)
     assert response.status_code == status.HTTP_200_OK
     assert isinstance(response.json(), dict)
 
 def test_health_connections_has_db_tea_profiles_key(client):
-    response = client.get("/health/connections")
+    response = client.get(HEALTH_CONNECTIONS_PREFIX)
     data = response.json()
     assert "db_tea_profiles" in data

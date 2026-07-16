@@ -3,6 +3,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 from src.utils.session_utils import get_session_cm
 from src.db.models.tea_profiles_model import TeaProfileModel
+from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 
@@ -46,3 +47,12 @@ def make_df_sqlite_compatible(df, model, delimiter = DELIMITER_VALUE):
             )
 
     return df
+
+def get_auth_headers(access_token: str, refresh_token: str):
+    return {
+        "Cookie": f"access_token={access_token}; refresh_token={refresh_token}"
+    }
+
+def get_empty_user_tea_profile_notes_body():
+    return UserTeaProfileNotesInboundSchema().model_dump()
+
