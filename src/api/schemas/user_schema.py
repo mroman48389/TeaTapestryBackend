@@ -18,6 +18,8 @@ class UserInternalSchema(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_login: datetime | None = None
+    is_verified: bool
+    verified_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -57,8 +59,8 @@ class UserOutboundSchema(BaseModel):
         max_length = 30,
         pattern = r"^[A-Za-z0-9\-\s]+$"
     )
-
     created_at: datetime
+    verified_at: datetime | None = None
 
     class Config:
         from_attributes = True

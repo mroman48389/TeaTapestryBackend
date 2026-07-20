@@ -2,19 +2,16 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
+import jwt  
 
-import jwt  # PyJWT
+from src.constants.jwt_constants import (
+    JWT_SECRET_KEY,
+    JWT_ALGORITHM,
+    ACCESS_TOKEN_LIFETIME_MINUTES,
+    REFRESH_TOKEN_LIFETIME_DAYS
+)
 
-# Set this in environment later.
-# Signing key, known only be the backend. Keep safe to avoid token 
-# forging.
-JWT_SECRET_KEY = "CHANGE_THIS_IN_PRODUCTION"
-JWT_ALGORITHM = "HS256"
-
-ACCESS_TOKEN_LIFETIME_MINUTES = 15
-REFRESH_TOKEN_LIFETIME_DAYS = 7
-
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, email_verified: bool) -> str:
     """
         Create a short-lived JWT access token for protected API routes.
         Sent in Authorization: Bearer <token>.
@@ -25,6 +22,7 @@ def create_access_token(user_id: str) -> str:
     payload = {
         "sub": user_id,                          # subject (user ID)
         "scope": "access",                       # token type
+        "email_verified": email_verified,
         "iat": int(datetime_now.timestamp()),    # issued at
         "exp": int(datetime_expired.timestamp()) # expiration
     }
@@ -33,7 +31,7 @@ def create_access_token(user_id: str) -> str:
     return token
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(user_id: str, email_verified: bool) -> str:
     """
         Create a long-lived JWT refresh token.
         Stored in HttpOnly cookie.
@@ -44,6 +42,7 @@ def create_refresh_token(user_id: str) -> str:
     payload = {
         "sub": user_id,                           # subject (user ID)
         "scope": "refresh",                       # token type
+        "email_verified": email_verified,
         "iat": int(datetime_now.timestamp()),     # issued at
         "exp": int(datetime_expired.timestamp()), # expiration
         "jti": str(uuid.uuid4())                  # JWT ID; guarantees uniqueness

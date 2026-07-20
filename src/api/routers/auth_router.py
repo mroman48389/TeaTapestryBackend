@@ -4,6 +4,9 @@ import logging
 from starlette import status
 import sentry_sdk
 import uuid
+import hashlib
+from datetime import datetime, timezone
+from fastapi.responses import JSONResponse
 
 from src.utils.session_utils import get_session
 from src.db.models.user_models import UserInternalModel
@@ -18,12 +21,14 @@ from src.utils.auth.password_utils import (
     validate_password_strength,
     verify_password
 )
+from src.constants.jwt_constants import (
+    ACCESS_TOKEN_LIFETIME_MINUTES,
+    REFRESH_TOKEN_LIFETIME_DAYS
+)
 from src.utils.auth.jwt_utils import (
     create_access_token,
     create_refresh_token, 
-    decode_token,
-    REFRESH_TOKEN_LIFETIME_DAYS,
-    ACCESS_TOKEN_LIFETIME_MINUTES,
+    decode_token
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import (
@@ -34,11 +39,19 @@ from src.constants.route_constants import (
     AUTH,
     AUTH_PREFIX,
     SIGN_UP,
+    VERIFY_EMAIL,
+    SEND_VERIFICATION,
     LOGIN,
     LOGOUT,
     REFRESH,
     ME
 )
+from src.utils.auth.email_verification_utils import (
+    create_verification_token,
+    send_verification_email
+)
+from src.constants.token_constants import EMAIL_VERIFICATION
+from src.db.models.verification_token_model import VerificationToken
 
 # use __name__ to get a logger named after the module we're in.
 logger = logging.getLogger(__name__)
@@ -107,6 +120,11 @@ def signup(
 
             logger.info(f"New user created: {new_user.id}")
 
+            # Create a verification token for the new user and send them an email
+            # so they can click a link to verify.
+            raw_token = create_verification_token(new_user, session)
+            send_verification_email(new_user, raw_token)
+
         except Exception:
             session.rollback()
             
@@ -117,8 +135,115 @@ def signup(
                 detail = "An unexpected error occurred while creating the account."
             )
         
-        # Return the UserOutboundSchema
+        # Return the UserOutboundSchema (FastAPI will take the relevant fields from
+        # the UserInboundSchema and serialize it into a UserOutboundSchema because
+        # of the response_model we set).
         return new_user
+
+
+@router.post(f"/{SEND_VERIFICATION}", status_code = status.HTTP_200_OK)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def send_verification(
+    request: Request,
+    response: Response,
+    current_user = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    # Prevent caching
+    response.headers["Cache-Control"] = "no-store"
+
+    # If the user already verified, do not resend.
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "Email is already verified."
+        )
+
+    # Delete old tokens for this user.
+    session.query(VerificationToken).filter(
+        VerificationToken.user_id == current_user.id,
+        VerificationToken.purpose == EMAIL_VERIFICATION
+    ).delete()
+    session.commit()
+
+    # Create a new token.
+    raw_token = create_verification_token(current_user, session)
+
+    # Send (print) the verification link.
+    send_verification_email(current_user, raw_token)
+
+    return {"message": "Verification email sent."}
+
+
+@router.post(f"/{VERIFY_EMAIL}", status_code = status.HTTP_200_OK)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def verify_email(
+    request: Request,
+    response: Response,
+    token: str,
+    session: Session = Depends(get_session)
+):
+    # Prevent caching.
+    response.headers["Cache-Control"] = "no-store"
+
+    # Hash the incoming raw token.
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Look up the token in the database.
+    verification_token = session.query(VerificationToken).filter(
+        VerificationToken.token_hash == token_hash,
+        VerificationToken.purpose == EMAIL_VERIFICATION
+    ).first()
+
+    if not verification_token:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "Invalid or unknown verification token."
+        )
+
+    # Check if the token was already used.
+    if verification_token.used:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "This verification link has already been used."
+        )
+
+    # Check to see if the verification token is expired.
+    expires_at = verification_token.expires_at
+
+    # SQLite strips timezone info, so normalize naive timestamps to UTC
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo = timezone.utc)
+
+    now = datetime.now(timezone.utc)
+
+    if expires_at < now:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "This verification link has expired."
+        )
+
+    # Fetch the user.
+    user = session.query(UserInternalModel).filter(
+        UserInternalModel.id == verification_token.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "User no longer exists."
+        )
+
+    # Mark the verification token as used.
+    verification_token.used = True
+
+    # Mark the user as verified and add the time verified.
+    user.is_verified = True
+    user.verified_at = now
+
+    session.commit()
+
+    return {"message": "Email verified successfully."}
 
 
 @router.post(f"/{LOGIN}", status_code = status.HTTP_200_OK)
@@ -132,6 +257,7 @@ def login(
     with sentry_sdk.start_span(op = AUTH, name = "login"):
         sentry_sdk.set_tag("endpoint", "login")
 
+        # Prevent caching
         response.headers["Cache-Control"] = "no-store"
 
         # Look up the user.
@@ -140,28 +266,28 @@ def login(
         ).first()
 
         # If they were not found, don't authorize.
-        if not user:
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid email or password."
-            )
-
-        # If they were found, verify their password.
-        if not verify_password(payload.password, user.hashed_password):
+        if (not user) or (not verify_password(payload.password, user.hashed_password)):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "Invalid email or password."
             )
 
         # Generate tokens.
-        access_token = create_access_token(str(user.id))
-        refresh_token = create_refresh_token(str(user.id))
+        access_token = create_access_token(str(user.id), user.is_verified)
+        refresh_token = create_refresh_token(str(user.id), user.is_verified)
 
         # Determine cookie security based on environment. Allows us to ignore
         # secure cookies, which do not work over http (we run locally over http and
         # production over https).
         hostname = request.url.hostname
-        is_local = hostname in ("localhost", "127.0.0.1")
+        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
+
+        response = JSONResponse(
+            content = {
+                "access_token": access_token,
+                "token_type": "bearer"
+            }
+        )
 
         # Set refresh token cookie. max_age is the number of seconds the browser 
         # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
@@ -186,14 +312,7 @@ def login(
             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )
 
-        # Return access token
-        return {
-            "access_token": access_token,
-            "token_type": "bearer"
-        }
-
-        # Placeholder response (JWTs coming).
-        # return {"message": "Login successful (tokens coming next)"}
+        return response
 
 
 @router.post(f"/{LOGOUT}")
@@ -206,7 +325,7 @@ def logout(
         sentry_sdk.set_tag("endpoint", "logout")
         
         hostname = request.url.hostname
-        is_local = hostname in ("localhost", "127.0.0.1")
+        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
 
         response.delete_cookie(
             key = "refresh_token",
@@ -284,14 +403,21 @@ def refresh_token(
             )
 
         # Issue a new access token.
-        new_access_token = create_access_token(str(user.id))
+        new_access_token = create_access_token(str(user.id), user.is_verified)
 
         # Issue a new refresh token (rotate the token). Prevents stolen 
         # refresh tokens from being reused.
-        new_refresh_token = create_refresh_token(str(user.id))
+        new_refresh_token = create_refresh_token(str(user.id), user.is_verified)
 
         hostname = request.url.hostname
-        is_local = hostname in ("localhost", "127.0.0.1")
+        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
+
+        response = JSONResponse(
+            content = {
+                "access_token": new_access_token,
+                "token_type": "bearer"
+            }
+        )
 
         response.set_cookie(
             key = "refresh_token",
@@ -313,11 +439,7 @@ def refresh_token(
             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )
 
-        # Return a new access token.
-        return {
-            "access_token": new_access_token,
-            "token_type": "bearer"
-        }
+        return response
 
 
 @router.get(f"/{ME}")

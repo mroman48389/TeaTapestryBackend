@@ -13,9 +13,11 @@ from src.db.base import Base
 import configparser
 
 # Import models so Alembic sees them
+from tests.types.test_types import FakeModel # noqa: F401 For testing
 from src.db.models.user_models import UserInternalModel # noqa: F401
 from src.db.models.tea_profiles_model import TeaProfileModel # noqa: F401
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel # noqa: F401
+from src.db.models.verification_token_model import VerificationToken  # noqa: F401
 
 # Disable interpolation globally for Alembic's config parser
 configparser.BasicInterpolation = None

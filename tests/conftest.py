@@ -24,7 +24,7 @@ from src.constants.model_metadata_constants import DELIMITER_VALUE
 # Mark the process as a pytest run. The application checks this flag to skip 
 # production startup logicsuch as creating real database tables or connecting 
 # to external services.
-os.environ["PYTEST_RUNNING"] = "1"
+os.environ["PYTEST_RUNNING"] = "true"
 
 # Report leaks (slow)
 # tracemalloc.start()
@@ -209,8 +209,8 @@ def test_user(create_test_db):
 
 @pytest.fixture
 def access_token_for_test_user(test_user):
-    return create_access_token(str(test_user.id))
+    return create_access_token(str(test_user.id), test_user.is_verified)
 
 @pytest.fixture
 def refresh_token_for_test_user(test_user):
-    return create_refresh_token(str(test_user.id))
+    return create_refresh_token(str(test_user.id), test_user.is_verified)

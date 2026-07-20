@@ -26,7 +26,7 @@ from src.api.error_handlers import register_exception_handlers
 ###############################################################################
 
 # Check to see if we're doing testing (set in conftest.py) 
-IS_TEST = os.environ.get("PYTEST_RUNNING") == "1" #
+IS_TEST = os.getenv("PYTEST_RUNNING", "false").lower() == "true"
 
 ENV = os.getenv("ENV", "development")
 

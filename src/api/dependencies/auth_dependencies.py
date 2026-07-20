@@ -23,7 +23,8 @@ def get_current_user(
     try:
         payload = decode_token(token)
 
-    except Exception:
+    except Exception as e:
+        print("Decode error:", e)
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED,
             detail = "Invalid or expired access token."
@@ -48,5 +49,7 @@ def get_current_user(
             status_code = status.HTTP_401_UNAUTHORIZED,
             detail = "User no longer exists."
         )
+
+    print("Request cookies inside get_current_user:", request.cookies)
 
     return user

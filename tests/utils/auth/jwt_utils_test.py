@@ -11,7 +11,7 @@ from src.utils.auth.jwt_utils import (
 
 
 def test_create_access_token_payload_correct():
-    token = create_access_token("testUser")
+    token = create_access_token("testUser", True)
     payload = decode_token(token)
 
     assert payload["sub"] == "testUser"
@@ -24,7 +24,7 @@ def test_create_access_token_payload_correct():
 
 
 def test_create_refresh_token_payload_correct():
-    token = create_refresh_token("testUser")
+    token = create_refresh_token("testUser", True)
     payload = decode_token(token)
 
     assert payload["sub"] == "testUser"
@@ -35,8 +35,8 @@ def test_create_refresh_token_payload_correct():
 
 
 def test_create_refresh_token_produces_unique_tokens_per_call():
-    token_1 = create_refresh_token("testUser")
-    token_2 = create_refresh_token("testUser")
+    token_1 = create_refresh_token("testUser", True)
+    token_2 = create_refresh_token("testUser", True)
 
     assert token_1 != token_2
 

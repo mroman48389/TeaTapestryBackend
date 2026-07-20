@@ -62,3 +62,15 @@ class UserInternalModel(Base):
         DateTime(timezone = True), 
         nullable = True
     )
+
+    # For gating features, login flows, JWT claims, UI banners.
+    is_verified: Mapped[bool] = mapped_column(
+        default = False,
+        nullable = False,
+    )
+
+    # For analytics, fraud detection, debugging, verified badges.
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone = True),
+        nullable = True,
+    )

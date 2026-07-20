@@ -20,7 +20,7 @@ def test_get_current_user_invalid_token(client):
 
 
 def test_get_current_user_wrong_scope(client, test_user):
-    refresh_token = create_refresh_token(str(test_user.id))
+    refresh_token = create_refresh_token(str(test_user.id), test_user.is_verified)
 
     response = client.get(
         "/auth/me",

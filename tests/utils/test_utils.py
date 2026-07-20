@@ -1,11 +1,15 @@
 from fastapi.routing import APIRoute
 from sqlalchemy.dialects.postgresql import ARRAY
+import hashlib
+from datetime import datetime, timezone, timedelta
 
 from src.utils.session_utils import get_session_cm
 from src.db.models.tea_profiles_model import TeaProfileModel
 from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.model_metadata_constants import DELIMITER_VALUE
+from src.db.models.verification_token_model import VerificationToken
+from src.constants.token_constants import EMAIL_VERIFICATION
 
 def get_dummy_value_for_param_type(param_type):
     """Return a dummy value based on the parameter type."""
@@ -56,3 +60,24 @@ def get_auth_headers(access_token: str, refresh_token: str):
 def get_empty_user_tea_profile_notes_body():
     return UserTeaProfileNotesInboundSchema().model_dump()
 
+def fake_create_token_factory(raw_token = "testtoken123"):
+    """
+        Returns a fake create_verification_token function that inserts a predictable
+        token into the DB and returns the raw token.
+    """
+    def fake_create_verification_token(user, session):
+        hashed_token = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        verification_token = VerificationToken(
+            user_id = user.id,
+            token_hash = hashed_token,
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes = 30),
+            purpose = EMAIL_VERIFICATION
+        )
+
+        session.add(verification_token)
+        session.commit()
+        
+        return raw_token
+    
+    return fake_create_verification_token
