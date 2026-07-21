@@ -50,6 +50,4 @@ def get_current_user(
             detail = "User no longer exists."
         )
 
-    print("Request cookies inside get_current_user:", request.cookies)
-
     return user

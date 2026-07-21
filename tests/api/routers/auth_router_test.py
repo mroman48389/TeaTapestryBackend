@@ -5,9 +5,6 @@ import uuid
 
 from src.db.models.user_models import UserInternalModel
 from src.utils.auth.password_utils import verify_password, hash_password
-from src.utils.auth.email_verification_utils import (
-    create_verification_token
-)
 from src.constants.route_constants import (
     AUTH_SIGNUP_PREFIX,
     AUTH_LOGIN_PREFIX,

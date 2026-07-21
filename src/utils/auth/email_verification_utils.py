@@ -1,9 +1,12 @@
 import secrets
 import hashlib
+import logging
 from datetime import datetime, timezone, timedelta
 
 from src.db.models.verification_token_model import VerificationToken
 from src.constants.token_constants import EMAIL_VERIFICATION
+
+logger = logging.getLogger(__name__)
 
 def create_verification_token(user, session):
     # Generate a secure random token.

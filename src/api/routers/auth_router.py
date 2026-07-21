@@ -118,8 +118,6 @@ def signup(
             session.commit()
             session.refresh(new_user)
 
-            logger.info(f"New user created: {new_user.id}")
-
             # Create a verification token for the new user and send them an email
             # so they can click a link to verify.
             raw_token = create_verification_token(new_user, session)
@@ -168,6 +166,9 @@ def send_verification(
 
     # Create a new token.
     raw_token = create_verification_token(current_user, session)
+
+    #mark
+    print("DEV VERIFICATION TOKEN:", raw_token)
 
     # Send (print) the verification link.
     send_verification_email(current_user, raw_token)
@@ -343,8 +344,7 @@ def logout(
         return {"message": "Logged out"}
 
 
-@router.post(f"/{REFRESH}", status_code = status.HTTP_200_OK
-)
+@router.post(f"/{REFRESH}", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def refresh_token(
     request: Request,
