@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlalchemy.orm import Session
-import logging
 from starlette import status
 import sentry_sdk
 import uuid
@@ -8,6 +7,7 @@ import hashlib
 from datetime import datetime, timezone
 from fastapi.responses import JSONResponse
 
+from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.session_utils import get_session
 from src.db.models.user_models import UserInternalModel
 from src.api.schemas.user_schema import (
@@ -62,9 +62,6 @@ from src.constants.token_constants import (
     PASSWORD_RESET
 )
 from src.db.models.verification_token_model import VerificationToken
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
@@ -136,7 +133,7 @@ def signup(
         except Exception:
             session.rollback()
             
-            logger.exception("Unexpected error during signup.")
+            safe_exception("Unexpected error during signup.")
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -177,8 +174,8 @@ def send_verification(
     # Create a new token.
     raw_token = create_raw_verification_token(current_user, session, EMAIL_VERIFICATION)
 
-    #mark
-    print("DEV VERIFICATION TOKEN:", raw_token)
+    #TODO: remove
+    safe_debug(f"DEV VERIFICATION TOKEN: {raw_token}")
 
     # Send (print) the verification link.
     send_verification_email(current_user, raw_token)
@@ -257,6 +254,9 @@ def verify_email(
     return {"message": "Email verified successfully."}
 
 
+# Postman test steps for testing request_password_reset and reset_password:
+#
+#     1. Call signup endpoint.
 @router.post(f"/{REQUEST_PASSWORD_RESET}", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def request_password_reset(
@@ -300,7 +300,8 @@ def request_password_reset(
             purpose = PASSWORD_RESET,
         )
 
-        print("DEV PASSWORD RESET TOKEN:", raw_token)
+        #TODO: remove
+        safe_debug(f"DEV PASSWORD RESET TOKEN:{raw_token}")
 
         send_password_reset_email(user, raw_token)
 

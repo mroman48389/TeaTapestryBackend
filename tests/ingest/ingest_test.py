@@ -1,8 +1,7 @@
-import logging
-
 from sqlalchemy import text
 # from sqlalchemy import inspect
 
+# from src.utils.log_utils import safe_debug
 from src.db.models.tea_profiles_model import TeaProfileModel
 from src.ingest.pipeline_orchestrator import ingest_data
 import src.ingest.pipeline_orchestrator as ingest_module
@@ -12,9 +11,6 @@ from src.constants.tea_profiles_constants import (
 )
 from src.utils.sample_data_utils import get_sample_tea_profiles_data
 from tests.utils.test_utils import make_df_sqlite_compatible
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 def test_ingest_data(monkeypatch, create_test_db, create_test_csv):
     # Use create_test_csv fixture to create a CSV file with sample data

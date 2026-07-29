@@ -1,4 +1,3 @@
-import os 
 # Use FastAPI framework to get decorators like @app.get, routing, validation,
 # and docs.
 from fastapi import FastAPI
@@ -20,15 +19,11 @@ from src.api.routers.health_router import router as health_router
 from src.api.routers.auth_router import router as auth_router
 from src.api.routers.user_tea_profile_notes_router import router as user_tea_profile_notes_router
 from src.api.error_handlers import register_exception_handlers
+from src.core.env import IS_RUNNING_TESTS, IS_LOCAL_ENV
 
 ###############################################################################
 ##############################   Configuration   ##############################
 ###############################################################################
-
-# Check to see if we're doing testing (set in conftest.py) 
-IS_TEST = os.getenv("PYTEST_RUNNING", "false").lower() == "true"
-
-ENV = os.getenv("ENV", "development")
 
 init_sentry()
 configure_logging()
@@ -46,7 +41,7 @@ async def lifespan(app: FastAPI):
     #
     # NOTE: we need to import the TeaProfileModel so that when we deploy with
     # Fly.io, the tables get built.
-    if not IS_TEST: 
+    if not IS_RUNNING_TESTS: 
         from src.db.engine import engine
         from src.db.models.tea_profiles_model import TeaProfileModel  # noqa: F401
 
@@ -88,7 +83,7 @@ register_exception_handlers(app)
 # Register routes to pick them up with testing. This must be done before defining
 # the global rate limiter so the per route decorators wrap the handler first.
 
-if ENV == "development":
+if IS_LOCAL_ENV:
     app.include_router(debug_router)
 
 app.include_router(tea_profiles_router)

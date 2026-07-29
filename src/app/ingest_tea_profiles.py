@@ -1,14 +1,11 @@
-import logging
 import glob
 
+from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.session_utils import get_session_cm
 from src.ingest.pipeline_orchestrator import ingest_data
 from src.db.models.tea_profiles_model import (
     TeaProfileModel, TeaProfileModelFields, REQUIRED_TEA_PROFILE_MODEL_FIELDS
 )
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 # Only run this block if the file is executed directly as the main
 # program and not if the file is imported. 
@@ -31,10 +28,10 @@ if __name__ == "__main__":
                     ],
                     [TeaProfileModelFields.NAME]
                 )
-                logger.info(f"Ingested {csv_path}")
+                safe_debug(f"Ingested {csv_path}")
                 
-        logger.info("tea_profiles ingestion complete.")
+        safe_debug("tea_profiles ingestion complete.")
         
     except Exception:
-        logger.exception("Ingestion failed.")
+        safe_exception("Ingestion failed.")
         raise

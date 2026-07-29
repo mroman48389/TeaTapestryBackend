@@ -9,7 +9,6 @@ from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInb
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 from src.db.models.verification_token_model import VerificationToken
-from src.constants.token_constants import EMAIL_VERIFICATION
 
 def get_dummy_value_for_param_type(param_type):
     """Return a dummy value based on the parameter type."""

@@ -1,12 +1,10 @@
 import secrets
 import hashlib
-import logging
 from datetime import datetime, timezone, timedelta
 
+from src.utils.log_utils import safe_debug, safe_info
 from src.db.models.verification_token_model import VerificationToken
 from src.constants.app_constants import FRONTEND_BASE_URL
-
-logger = logging.getLogger(__name__)
 
 def create_raw_verification_token(user, session, purpose, expiration_minutes = 30):
     # Generate a secure random token.
@@ -30,7 +28,7 @@ def create_raw_verification_token(user, session, purpose, expiration_minutes = 3
     session.add(verification_token)
     session.commit()
 
-    logger.info(f"Created {purpose} token for user {user.id}")
+    safe_info(f"Created {purpose} token for user {user.id}")
 
     # Return the raw token for the email link.
     return raw_token_str
@@ -48,11 +46,11 @@ def send_verification_email(user, raw_token):
     verification_link = build_frontend_token_link("verify-email", raw_token)
 
     # TODO: integrate email provider (SendGrid, Mailgun, SES)
-    print(f"Send email to {user.email}: {verification_link}")
+    safe_debug(f"Send email to {user.email}: {verification_link}")
 
 
 def send_password_reset_email(user, raw_token):
     password_reset_link = build_frontend_token_link("reset-password", raw_token)
 
     # TODO: integrate email provider
-    print(f"Send password reset email to {user.email}: {password_reset_link}")
+    safe_debug(f"Send password reset email to {user.email}: {password_reset_link}")

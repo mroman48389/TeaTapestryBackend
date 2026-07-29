@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 
+# from src.utils.log_utils import safe_debug
 from src.app.services.health_services import HealthService
 from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
 from src.core.rate_limit.setup_rate_limit import rate_limiter
@@ -7,11 +8,6 @@ from src.constants.route_constants import (
     HEALTH_PREFIX,
     CONNECTIONS
 )
-
-import logging
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 # Define group of routes with health as their base path and health
 # for documentation grouping.

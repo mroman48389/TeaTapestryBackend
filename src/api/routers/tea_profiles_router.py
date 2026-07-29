@@ -7,7 +7,6 @@ from typing import List, get_origin, get_args, Union, cast, Any
 from datetime import datetime, timezone
 import sentry_sdk
 from starlette import status
-import logging
 
 from src.utils.session_utils import get_session
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
@@ -21,9 +20,6 @@ from src.utils.date_utils import http_date
 from src.constants.route_constants import (
     TEA_PROFILES_PREFIX
 )
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 # Define group of routes with api/tea_profiles as their base path and tea_profiles
 # for documentation grouping.

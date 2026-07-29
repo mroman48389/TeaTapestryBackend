@@ -538,8 +538,6 @@ class TestAuthLogin:
         create_test_db.add(user)
         create_test_db.commit()
 
-        print(create_test_db.query(UserInternalModel).all())
-
         # Log in with the same email and password.
         payload = {
             "email": "someUsername@somedomain.com",

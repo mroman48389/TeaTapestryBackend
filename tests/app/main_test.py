@@ -4,10 +4,8 @@
 from starlette import status
 import sys
 import os
-import logging
 
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
+# from src.utils.log_utils import safe_debug
 
 # from src.app.main import app
 # from tests.utils.test_utils import get_path_with_dummy_params

@@ -1,8 +1,6 @@
-import logging
 from src.cache.simple_cache import SimpleCache
 
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
+# from src.utils.log_utils import safe_debug
 
 def test_cache_miss_increments_misses():
     cache = SimpleCache(ttl_seconds = 300)

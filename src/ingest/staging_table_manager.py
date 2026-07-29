@@ -1,14 +1,9 @@
 # Create and manage staging table.
-
-import logging
-
 from sqlalchemy import text
 
+# from src.utils.log_utils import safe_debug
 from src.utils.staging_utils import get_staging_table_name
 from src.utils.model_utils import get_dtype_mapping
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 def create_staging_table(session, base_table: str):
     staging_table = get_staging_table_name(session, base_table)

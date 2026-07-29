@@ -1,10 +1,8 @@
 import hashlib
 import json
-import logging
-from .serialization_utils import to_serializable
 
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
+from src.utils.serialization_utils import to_serializable
+# from src.utils.log_utils import safe_debug
 
 def generate_etag(data) -> str:
     # Make sure that data is serialized first so we don't get an error in converting it.

@@ -1,4 +1,13 @@
 import os 
+
+# Mark the process as a pytest run. The application checks this flag to skip 
+# production startup logicsuch as creating real database tables or connecting 
+# to external services.
+#
+# NOTE: Must be set before other imports or PYTEST_RUNNING will be false for 
+# all the tests.
+os.environ["PYTEST_RUNNING"] = "true"
+
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 import pytest
@@ -19,12 +28,6 @@ from src.utils.auth.password_utils import hash_password
 from src.utils.auth.jwt_utils import create_access_token, create_refresh_token
 from tests.utils.test_utils import get_empty_user_tea_profile_notes_body
 from src.constants.model_metadata_constants import DELIMITER_VALUE
-
-
-# Mark the process as a pytest run. The application checks this flag to skip 
-# production startup logicsuch as creating real database tables or connecting 
-# to external services.
-os.environ["PYTEST_RUNNING"] = "true"
 
 # Report leaks (slow)
 # tracemalloc.start()

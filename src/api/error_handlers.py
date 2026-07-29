@@ -5,7 +5,6 @@
 # a consistent JSON error shape.
 
 from __future__ import annotations
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 from uuid import uuid4
@@ -14,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette import status
 from sentry_sdk import set_context
 
+from src.utils.log_utils import safe_error, safe_exception
 from src.app.errors import (
     DomainError,
     TeaProfileNotFoundError,
@@ -21,12 +21,6 @@ from src.app.errors import (
     TeaProfileConflictError,
     TeaProfileQueryError,
 )
-
-# Set up a logger for this module. __name__ will produce "api.error_handlers". This
-# will tell us the name of the file that produced messages in logs. We can enable or
-# disable them per module, filter logs by module name, and have more control over our
-# log information.
-logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -82,7 +76,7 @@ def _error_response(
     }
 
     # Structured log for observability
-    logger.error(
+    safe_error(
         (f"API error: type={exc_type}, status={status_code}, "
          f"path={path}, request_id={request_id}, details={details}")
     )
@@ -192,7 +186,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         set_context("request", {"request_id": request_id})
 
         # Last-resort catch-all: never leak raw exceptions to clients.
-        logger.exception("Unhandled exception", exc_info = exc)
+        safe_exception("Unhandled exception", exc)
 
         return _error_response(
             request = request,

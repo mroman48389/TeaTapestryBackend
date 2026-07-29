@@ -3,6 +3,8 @@ import logging
 from logging import Handler
 from logging.handlers import RotatingFileHandler
 
+from src.core.env import IS_LOCAL_ENV
+
 LOG_FORMAT = (
     "%(asctime)s | %(levelname)-8s | %(name)s | request_id=%(request_id)s | %(message)s"
 )
@@ -22,10 +24,8 @@ def configure_logging():
 
     handlers: list[Handler] = [handler_console]
 
-    ENV_DEVELOPMENT = os.getenv("ENVIRONMENT", "development") 
-
     # File handler is only enabled in development.
-    if ENV_DEVELOPMENT == "development":
+    if IS_LOCAL_ENV:
         os.makedirs("logs", exist_ok = True)
 
         # Automatically refresh the logs. logs/backend.log will never
@@ -49,7 +49,7 @@ def configure_logging():
     # Enable SQLAlchemy engine logging (safe, no parameters logged)
     # Did this so we can run a PowerShell script to detect N+1 problems.
     sqlalchemy_logger = logging.getLogger("sqlalchemy.engine")
-    if ENV_DEVELOPMENT == "development":
+    if IS_LOCAL_ENV:
         sqlalchemy_logger.setLevel(logging.INFO)
     else:
         sqlalchemy_logger.setLevel(logging.WARNING)

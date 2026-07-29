@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from starlette import status
 import sentry_sdk
-import logging
 
+# from src.utils.log_utils import safe_debug
 from src.api.schemas.user_tea_profile_notes_schema import (
     UserTeaProfileNotesInboundSchema,
     UserTeaProfileNotesOutboundSchema,
@@ -25,9 +25,6 @@ from src.core.rate_limit.config_rate_limit import (
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.constants.route_constants import USER_TEA_PROFILE_NOTES_PREFIX
-
-# use __name__ to get a logger named after the module we're in.
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix = USER_TEA_PROFILE_NOTES_PREFIX, tags = ["user_tea_profile_notes"])
 
