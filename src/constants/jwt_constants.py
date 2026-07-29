@@ -1,4 +1,4 @@
-# Set this in environment later.
+# TODO: Set this in environment later.
 # Signing key, known only be the backend. Keep safe to avoid token 
 # forging.
 JWT_SECRET_KEY = "CHANGE_THIS_IN_PRODUCTION"

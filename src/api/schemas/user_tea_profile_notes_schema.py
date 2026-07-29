@@ -24,6 +24,7 @@ class UserTeaProfileNotesBaseSchema(BaseModel):
     wet_leaf_aroma: str = ""
 
 class UserTeaProfileNotesInboundSchema(UserTeaProfileNotesBaseSchema):
+    
     # Prevent client from adding extra fields.
     class Config:
         extra = "forbid"

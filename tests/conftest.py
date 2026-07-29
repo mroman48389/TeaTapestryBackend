@@ -35,10 +35,29 @@ os.environ["PYTEST_RUNNING"] = "true"
 # dictate when they're created and destroyed.  Scope can be function,
 # class, module, session, etc. Function means the method will be created
 # and destroyed for each test we define. 
-#
+
 # This fixture provides an isolated, in‑memory SQLite database for tests.
 # It ensures every test runs in a clean sandbox so no real database or files
 # are touched. Use it instead of "Session" (from sqlalchemy.orm).
+#
+# By passing this fixture to our tests, we can add multiple types of data. All
+# of the following is in the same database, just different tables:
+#
+#     users, tea profiles, user tea profile notes, verification tokens.
+#
+# For example, we can do:
+#
+#     create_test_db.add(user)
+#     create_test_db.add(token)
+#     create_test_db.commit()
+#
+# in the same test to add a new user to the users table and a new email 
+# verification token to the verification tokens table. SQLAlchemy will use the 
+# __table__name in the models we defined to add the data to the proper table.
+# create_test_db will return the same SQLAlchemy session (database connection) no 
+# matter how many times it's called in the same test. The first time it's called,
+# it sets the database up for use. All subsequent calls simple return the 
+# database that's set up by the first call.
 @pytest.fixture(scope = "function")
 def create_test_db():
     # Create an in‑memory SQLite engine. Using StaticPool + check_same_thread=False

@@ -1,0 +1,1 @@
+FRONTEND_BASE_URL = "https://tea-tapestry.netlify.app"

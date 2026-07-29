@@ -60,19 +60,19 @@ def get_auth_headers(access_token: str, refresh_token: str):
 def get_empty_user_tea_profile_notes_body():
     return UserTeaProfileNotesInboundSchema().model_dump()
 
-def fake_create_token_factory(raw_token = "testtoken123"):
+def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
     """
         Returns a fake create_verification_token function that inserts a predictable
         token into the DB and returns the raw token.
     """
-    def fake_create_verification_token(user, session):
+    def fake_create_raw_verification_token(user, session, *args, **kwargs):
         hashed_token = hashlib.sha256(raw_token.encode()).hexdigest()
 
         verification_token = VerificationToken(
             user_id = user.id,
             token_hash = hashed_token,
             expires_at = datetime.now(timezone.utc) + timedelta(minutes = 30),
-            purpose = EMAIL_VERIFICATION
+            purpose = purpose
         )
 
         session.add(verification_token)
@@ -80,4 +80,4 @@ def fake_create_token_factory(raw_token = "testtoken123"):
         
         return raw_token
     
-    return fake_create_verification_token
+    return fake_create_raw_verification_token

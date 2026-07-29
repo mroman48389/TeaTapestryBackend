@@ -2,6 +2,7 @@ from starlette import status
 from datetime import datetime, timezone, timedelta
 import jwt
 import uuid
+import hashlib
 
 from src.db.models.user_models import UserInternalModel
 from src.utils.auth.password_utils import verify_password, hash_password
@@ -10,12 +11,17 @@ from src.constants.route_constants import (
     AUTH_LOGIN_PREFIX,
     AUTH_SEND_VERIFICATION_PREFIX,
     AUTH_VERIFY_EMAIL_PREFIX,
+    AUTH_REQUEST_PASSWORD_RESET_PREFIX,
+    AUTH_RESET_PASSWORD_PREFIX,
     AUTH_LOGOUT_PREFIX,
     AUTH_REFRESH_PREFIX,
     AUTH_ME_PREFIX
 )
 from src.db.models.verification_token_model import VerificationToken
-from src.constants.token_constants import EMAIL_VERIFICATION
+from src.constants.token_constants import (
+    EMAIL_VERIFICATION,
+    PASSWORD_RESET,
+)
 from src.constants.jwt_constants import JWT_SECRET_KEY, JWT_ALGORITHM
 from tests.utils.test_utils import fake_create_token_factory
 
@@ -160,7 +166,7 @@ class TestAuthSendVerification:
 # VERIFY EMAIL
 # ---------------------------------------------------------
 
-class TestVerifyEmail:
+class TestAuthVerifyEmail:
 
     def test_verify_email_success(self, client, create_test_db, monkeypatch):
         # monkeypatch token creation so signup uses a known raw token. The real 
@@ -168,8 +174,8 @@ class TestVerifyEmail:
         # impossible to retrieve in tests. We need the raw verification token
         # string for the test and shouldn't have signup return it.
         monkeypatch.setattr(
-            "src.api.routers.auth_router.create_verification_token",
-            fake_create_token_factory("success_token")
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(EMAIL_VERIFICATION, "success_token")
         )
 
         # Sign up.
@@ -206,8 +212,8 @@ class TestVerifyEmail:
         # impossible to retrieve in tests. We need the raw verification token
         # string for the test and shouldn't have signup return it.
         monkeypatch.setattr(
-            "src.api.routers.auth_router.create_verification_token",
-            fake_create_token_factory("expired_token")
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(EMAIL_VERIFICATION, "expired_token")
         )
 
         # Sign up.
@@ -242,8 +248,8 @@ class TestVerifyEmail:
         # impossible to retrieve in tests. We need the raw verification token
         # string for the test and shouldn't have signup return it.
         monkeypatch.setattr(
-            "src.api.routers.auth_router.create_verification_token",
-            fake_create_token_factory("used_token")
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(EMAIL_VERIFICATION, "used_token")
         )
 
         # Sign up.
@@ -268,6 +274,247 @@ class TestVerifyEmail:
         # If we try sending an email verification link, it should fail (since we marked 
         # the token as used).
         response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "already been used" in response.json()["detail"]
+
+
+# ---------------------------------------------------------
+# REQUEST PASSWORD RESET
+# ---------------------------------------------------------
+
+class TestAuthRequestPasswordReset:
+
+    def test_request_password_reset_success(self, client, create_test_db, monkeypatch):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Monkeypatch token creation so we know the raw token.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(PASSWORD_RESET, "reset_token")
+        )
+
+        payload = {"email": "someUsername@somedomain.com"}
+
+        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
+
+        # Recall that we should always get back OK as a security measure.
+        assert response.status_code == status.HTTP_200_OK
+        assert "reset link" in response.json()["message"]
+
+        # A password reset verification token should exist.
+        verification_token = create_test_db.query(VerificationToken).filter_by(
+            user_id = user.id,
+            purpose = PASSWORD_RESET
+        ).first()
+        assert verification_token is not None
+        assert verification_token.used is False
+
+
+    def test_request_password_reset_nonexistent_email(self, client, create_test_db):
+
+        # We could create a user and use a nonexistent email to be perfectly explicit,
+        # but it's not necessary.
+        payload = {"email": "someUsername@somedomain.com"}
+
+        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
+
+        # Recall that we should always get back OK as a security measure.
+        assert response.status_code == status.HTTP_200_OK
+        assert "reset link" in response.json()["message"]
+
+        # No token should have been created.
+        tokens = create_test_db.query(VerificationToken).all()
+        assert len(tokens) == 0
+
+
+    def test_request_password_reset_deletes_old_tokens(self, client, create_test_db, monkeypatch):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Create an old token and add it to the database.
+        old_token = VerificationToken(
+            user_id = user.id,
+            token_hash = "old_hash",
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(old_token)
+        create_test_db.commit()
+
+        # Monkeypatch new token creation.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(PASSWORD_RESET, "new_token")
+        )
+
+        payload = {"email": "someUsername@somedomain.com"}
+
+        # Recall that we should always get back OK as a security measure.
+        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
+        assert response.status_code == status.HTTP_200_OK
+
+        # The old token should be have been deleted, and there should be only 
+        # the new one in the database.
+
+        tokens = create_test_db.query(VerificationToken).filter_by(
+            user_id = user.id,
+            purpose = PASSWORD_RESET
+        ).all()
+        assert len(tokens) == 1
+        assert tokens[0].token_hash == hashlib.sha256("new_token".encode()).hexdigest()
+
+
+# ---------------------------------------------------------
+# RESET PASSWORD
+# ---------------------------------------------------------
+
+class TestAuthResetPassword:
+
+    def test_reset_password_success(self, client, create_test_db, monkeypatch):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Monkeypatch token creation.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(PASSWORD_RESET, "reset_token")
+        )
+
+        # Create token manually (simulate a succesful request_password_reset call).
+        raw_token = "reset_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        verification_token = VerificationToken(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        # Recall that we should always get back OK as a security measure.
+        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
+        assert response.status_code == status.HTTP_200_OK
+
+        # Token should be marked used.
+        updated_token = create_test_db.query(VerificationToken).filter_by(
+            user_id = user.id
+        ).first()
+        assert updated_token.used is True
+
+        # Password should be updated
+        updated_user = create_test_db.query(UserInternalModel).filter_by(id = user.id).first()
+        assert verify_password("NewPassword@123", updated_user.hashed_password)
+
+
+    def test_reset_password_invalid_token(self, client, create_test_db):
+        # We could create a user to be perfectly explicit, but it's not necessary for this test.
+        payload = {
+            "token": "invalid",
+            "new_password": "NewPassword@123"
+        }
+
+        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "unknown" in response.json()["detail"]
+
+
+    def test_reset_password_expired_token(self, client, create_test_db):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Create and add an expired token to the database.
+        raw_token = "expired_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        verification_token = VerificationToken(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) - timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "expired" in response.json()["detail"]
+
+
+    def test_reset_password_used_token(self, client, create_test_db):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Create and add a used token to the database.
+        raw_token = "used_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        token = VerificationToken(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = True
+        )
+        create_test_db.add(token)
+        create_test_db.commit()
+
+        payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "already been used" in response.json()["detail"]
 

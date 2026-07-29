@@ -15,6 +15,10 @@ from src.api.schemas.user_schema import (
     UserOutboundSchema,
     LoginSchema
 )
+from src.api.schemas.password_reset_schema import (
+    PasswordResetRequestSchema, 
+    PasswordResetSubmissionSchema,
+)
 from src.api.dependencies.auth_dependencies import get_current_user
 from src.utils.auth.password_utils import (
     hash_password, 
@@ -41,16 +45,22 @@ from src.constants.route_constants import (
     SIGN_UP,
     VERIFY_EMAIL,
     SEND_VERIFICATION,
+    REQUEST_PASSWORD_RESET,
+    RESET_PASSWORD,
     LOGIN,
     LOGOUT,
     REFRESH,
     ME
 )
-from src.utils.auth.email_verification_utils import (
-    create_verification_token,
-    send_verification_email
+from src.utils.auth.token_utils import (
+    create_raw_verification_token,
+    send_verification_email,
+    send_password_reset_email
 )
-from src.constants.token_constants import EMAIL_VERIFICATION
+from src.constants.token_constants import (
+    EMAIL_VERIFICATION,
+    PASSWORD_RESET
+)
 from src.db.models.verification_token_model import VerificationToken
 
 # use __name__ to get a logger named after the module we're in.
@@ -120,7 +130,7 @@ def signup(
 
             # Create a verification token for the new user and send them an email
             # so they can click a link to verify.
-            raw_token = create_verification_token(new_user, session)
+            raw_token = create_raw_verification_token(new_user, session, EMAIL_VERIFICATION)
             send_verification_email(new_user, raw_token)
 
         except Exception:
@@ -165,7 +175,7 @@ def send_verification(
     session.commit()
 
     # Create a new token.
-    raw_token = create_verification_token(current_user, session)
+    raw_token = create_raw_verification_token(current_user, session, EMAIL_VERIFICATION)
 
     #mark
     print("DEV VERIFICATION TOKEN:", raw_token)
@@ -190,7 +200,7 @@ def verify_email(
     # Hash the incoming raw token.
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
-    # Look up the token in the database.
+    # Look up the email verification token in the database.
     verification_token = session.query(VerificationToken).filter(
         VerificationToken.token_hash == token_hash,
         VerificationToken.purpose == EMAIL_VERIFICATION
@@ -245,6 +255,151 @@ def verify_email(
     session.commit()
 
     return {"message": "Email verified successfully."}
+
+
+@router.post(f"/{REQUEST_PASSWORD_RESET}", status_code = status.HTTP_200_OK)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def request_password_reset(
+    request: Request,
+    response: Response,
+    payload: PasswordResetRequestSchema,
+    session: Session = Depends(get_session)
+):
+    with sentry_sdk.start_span(op = AUTH, name = "request_password_reset"):
+        sentry_sdk.set_tag("endpoint", "request_password_reset")
+
+        # Prevent caching.
+        response.headers["Cache-Control"] = "no-store"
+
+        # Get the user from their email.
+        user = session.query(UserInternalModel).filter(
+            UserInternalModel.email == payload.email
+        ).first()
+
+        # Prevent hackers from using enumeration attacks to discover valid accounts by 
+        # submitting emails and observing the response. 200 will be returned whether
+        # we found the user or not. 
+        # 
+        # Avoid saying the email wasn't found, revealing anything about the user 
+        # database, and returning 404 or 400.
+        request_password_reset_msg = "If the email exists, a reset link has been sent."
+        if not user:
+            return {"message": request_password_reset_msg}
+
+        # Delete old password reset verification tokens for the user.
+        session.query(VerificationToken).filter(
+            VerificationToken.user_id == user.id,
+            VerificationToken.purpose == PASSWORD_RESET
+        ).delete()
+        session.commit()
+
+        # Create a new password reset token.
+        raw_token = create_raw_verification_token(
+            user,
+            session,
+            purpose = PASSWORD_RESET,
+        )
+
+        print("DEV PASSWORD RESET TOKEN:", raw_token)
+
+        send_password_reset_email(user, raw_token)
+
+        return {"message": request_password_reset_msg}
+
+
+@router.post(f"/{RESET_PASSWORD}", status_code = status.HTTP_200_OK)
+@rate_limiter.limit(VERY_LOW_RATE_LIMIT)
+def reset_password(
+    request: Request,
+    response: Response,
+    payload: PasswordResetSubmissionSchema,
+    session: Session = Depends(get_session)
+):
+    with sentry_sdk.start_span(op = AUTH, name = "reset_password"):
+        sentry_sdk.set_tag("endpoint", "reset_password")
+
+        # Prevent caching.
+        response.headers["Cache-Control"] = "no-store"
+
+        # Hash incoming raw token.
+        token_hash = hashlib.sha256(payload.token.encode()).hexdigest()
+
+        # Try to find a password reset verification token given the inbound
+        # hash.
+        verification_token = session.query(VerificationToken).filter(
+            VerificationToken.token_hash == token_hash,
+            VerificationToken.purpose == PASSWORD_RESET
+        ).first()
+
+        if not verification_token:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "Invalid or unknown password reset token."
+            )
+
+        # Check if the password reset verification token was already used.
+        if verification_token.used:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "This password reset link has already been used."
+            )
+
+        # Check to see if the password reset verification token has expired.
+        expires_at = verification_token.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo = timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        if expires_at < now:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "This password reset link has expired."
+            )
+
+        # Get the user from the password reset verification token.
+        user = session.query(UserInternalModel).filter(
+            UserInternalModel.id == verification_token.user_id
+        ).first()
+
+        if not user:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "The user does not exist."
+            )
+
+        # Validate password strength of the user's new password.
+        validate_password_strength(payload.new_password)
+
+        # Update password.
+        user.hashed_password = hash_password(payload.new_password)
+
+        # Mark the password reset verification token as used.
+        verification_token.used = True
+
+        # Determine cookie security based on environment. Allows us to ignore
+        # secure cookies, which do not work over http (we run locally over http and
+        # production over https).
+        hostname = request.url.hostname
+        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
+
+        # Delete refresh and access tokens.
+        response.delete_cookie(
+            key = "refresh_token",
+            path = "/",
+            secure = not is_local,
+            samesite = "lax"
+        )
+
+        response.delete_cookie(
+            key = "access_token",
+            path = "/",
+            secure = not is_local,
+            samesite = "lax"
+        )
+
+        session.commit()
+
+        return {"message": "Password reset successfully."}
 
 
 @router.post(f"/{LOGIN}", status_code = status.HTTP_200_OK)
