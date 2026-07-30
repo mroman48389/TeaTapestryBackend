@@ -146,6 +146,43 @@ def signup(
         return new_user
 
 
+# Postman test steps for testing send_verification and verify_email:
+#
+#     1. Create the user. Call signup endpoint as POST /auth/signup with body
+#
+#         {
+#             "email": "someUsername@gmail.com",
+#             "password": "SomePassword@123",
+#             "display_name": "Some User"
+#         }
+#
+#     2. Authenticate the user. Call login endpoint as POST /auth/login with body
+#
+#         {
+#             "email": "someUsername@gmail.com",
+#             "password": "SomePassword@123"
+#         }
+#
+#         Copy the access token from the response. You will need it for the
+#         send_verification endpoint.
+#
+#     3. Send a verification email. Call send_verification as POST /auth/send_verification
+#        with the Authorization header:
+#
+#            Authorization: Bearer <access_token>
+#
+#        This endpoint will log the raw email_verification token (only in development
+#        mode). You'll need that for verify_email, so grab it.
+#
+#     4. Verify the email. Call verify_email as POST /auth/verify_email?token=[raw_token]
+#
+#        If the token is valid, the endpoint should return a success message and mark
+#        the user's email as verified. See note in verify_email for why we put the token in 
+#        the URL.
+#
+#     5. (Optional) Try calling verify_email again with the same token. It should now fail
+#        because the token has already been used.
+
 @router.post(f"/{SEND_VERIFICATION}", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def send_verification(
@@ -194,7 +231,11 @@ def verify_email(
     # Prevent caching.
     response.headers["Cache-Control"] = "no-store"
 
-    # Hash the incoming raw token.
+    # Hash the incoming raw token. The token will come from the URL
+    # (forwarded by the frontend to the backend) so we have a 
+    # frictionless one-click action for the user. Email verification
+    # tokens are non-sensitive (don't grant login access), so this is 
+    # safe to do.
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     # Look up the email verification token in the database.
@@ -256,7 +297,38 @@ def verify_email(
 
 # Postman test steps for testing request_password_reset and reset_password:
 #
-#     1. Call signup endpoint.
+#     1. Create the user. Call signup endpoint as POST /auth/signup with body
+#
+#         {
+#             "email": "someUsername@gmail.com",
+#             "password": "SomePassword@123",
+#             "display_name": "Some User"
+#         }
+#
+#     2. Send a reset email. Call request_password_reset as POST /auth/request_password_reset 
+#        with body
+#
+#        {
+#            "email": "someUsername@gmail.com"
+#        }
+#
+#        This endpoint will log the raw token (only in development mode). You'll
+#        need that for reset_password, so grab it.
+#
+#     3. Reset the password. Call reset_password as POST /auth/reset_password
+#        with body
+#
+#        {
+#            "new_password": "NewPassword@123"
+#            "token": "[raw_token]"
+#        }
+#
+#        See note in reset_password for why we place the token in the body instead of as
+#        part of the URL like we did with verify_email.
+#
+#     4. Try the login endpoint with the new password and then again with the old password. The 
+#        former should work, the latter should fail.
+#
 @router.post(f"/{REQUEST_PASSWORD_RESET}", status_code = status.HTTP_200_OK)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def request_password_reset(
@@ -300,7 +372,7 @@ def request_password_reset(
             purpose = PASSWORD_RESET,
         )
 
-        #TODO: remove
+        # So we can grab the raw token when testing password resets via Postman.
         safe_debug(f"DEV PASSWORD RESET TOKEN:{raw_token}")
 
         send_password_reset_email(user, raw_token)
@@ -322,7 +394,12 @@ def reset_password(
         # Prevent caching.
         response.headers["Cache-Control"] = "no-store"
 
-        # Hash incoming raw token.
+        # Hash incoming raw token. It must come from the body of the call
+        # instead of as part of the URL (which we did with verify_email),
+        # because this is a sensitive, high-risk form submission action. The email
+        # contains a link to the frontend page rather than the backend page.
+        # The frontend gets the new password and sends a POST with the token
+        # and new password. 
         token_hash = hashlib.sha256(payload.token.encode()).hexdigest()
 
         # Try to find a password reset verification token given the inbound
