@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from src.utils.session_utils import get_session
 from src.db.models.user_models import UserInternalModel
-from src.utils.auth.jwt_utils import decode_token
+from src.utils.auth.jwt_utils import decode_access_token
 
 def get_current_user(
     request: Request,
@@ -21,7 +21,7 @@ def get_current_user(
 
     # Decode token, and make sure it's an access token.
     try:
-        payload = decode_token(token)
+        payload = decode_access_token(token)
 
     except Exception:
         raise HTTPException(

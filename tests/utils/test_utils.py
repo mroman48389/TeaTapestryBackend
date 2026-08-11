@@ -8,7 +8,7 @@ from src.db.models.tea_profiles_model import TeaProfileModel
 from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.model_metadata_constants import DELIMITER_VALUE
-from src.db.models.verification_token_model import VerificationToken
+from src.db.models.verification_token_model import VerificationTokenModel
 
 def get_dummy_value_for_param_type(param_type):
     """Return a dummy value based on the parameter type."""
@@ -67,7 +67,7 @@ def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
     def fake_create_raw_verification_token(user, session, *args, **kwargs):
         hashed_token = hashlib.sha256(raw_token.encode()).hexdigest()
 
-        verification_token = VerificationToken(
+        verification_token = VerificationTokenModel(
             user_id = user.id,
             token_hash = hashed_token,
             expires_at = datetime.now(timezone.utc) + timedelta(minutes = 30),

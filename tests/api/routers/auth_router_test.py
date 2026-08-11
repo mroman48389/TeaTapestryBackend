@@ -1,6 +1,5 @@
 from starlette import status
 from datetime import datetime, timezone, timedelta
-import jwt
 import uuid
 import hashlib
 
@@ -17,12 +16,12 @@ from src.constants.route_constants import (
     AUTH_REFRESH_PREFIX,
     AUTH_ME_PREFIX
 )
-from src.db.models.verification_token_model import VerificationToken
+from src.db.models.verification_token_model import VerificationTokenModel
 from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET,
 )
-from src.constants.jwt_constants import JWT_SECRET_KEY, JWT_ALGORITHM
+from src.utils.auth.jwt_utils import decode_access_token
 from tests.utils.test_utils import fake_create_token_factory
 
 # ---------------------------------------------------------
@@ -99,7 +98,7 @@ class TestAuthSignup:
         assert response.status_code == status.HTTP_201_CREATED
 
         # Check DB for email verification token.
-        token = create_test_db.query(VerificationToken).filter_by(
+        token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = uuid.UUID(response.json()["id"]),
             purpose = EMAIL_VERIFICATION
         ).first()
@@ -135,7 +134,7 @@ class TestAuthSendVerification:
         assert login_response.status_code == status.HTTP_200_OK
 
         # Get email verification token.
-        email_verification_token = create_test_db.query(VerificationToken).filter_by(
+        email_verification_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id,
             purpose = EMAIL_VERIFICATION
         ).first()
@@ -149,7 +148,7 @@ class TestAuthSendVerification:
         assert send_verification_response.status_code == status.HTTP_200_OK
 
         # We should have started with one token and should now have two.
-        tokens = create_test_db.query(VerificationToken).filter_by(
+        tokens = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id,
             purpose = EMAIL_VERIFICATION
         ).all()
@@ -195,7 +194,7 @@ class TestAuthVerifyEmail:
         assert response.status_code == status.HTTP_200_OK
 
        # Check to see that the verification token is used.
-        verification_token = create_test_db.query(VerificationToken).filter_by(
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id
         ).first()
         assert verification_token.used is True
@@ -229,7 +228,7 @@ class TestAuthVerifyEmail:
         raw_token = "expired_token"
 
         # Get the token created by signup and change the expiration timestamp.
-        verification_token = create_test_db.query(VerificationToken).filter_by(
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id
         ).first()
         verification_token.expires_at = datetime.now(timezone.utc) - timedelta(hours = 1)
@@ -265,7 +264,7 @@ class TestAuthVerifyEmail:
         raw_token = "used_token"
 
         # Mark the verification token as used.
-        verification_token = create_test_db.query(VerificationToken).filter_by(
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id
         ).first()
         verification_token.used = True
@@ -310,7 +309,7 @@ class TestAuthRequestPasswordReset:
         assert "reset link" in response.json()["message"]
 
         # A password reset verification token should exist.
-        verification_token = create_test_db.query(VerificationToken).filter_by(
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user.id,
             purpose = PASSWORD_RESET
         ).first()
@@ -331,7 +330,7 @@ class TestAuthRequestPasswordReset:
         assert "reset link" in response.json()["message"]
 
         # No token should have been created.
-        tokens = create_test_db.query(VerificationToken).all()
+        tokens = create_test_db.query(VerificationTokenModel).all()
         assert len(tokens) == 0
 
 
@@ -347,7 +346,7 @@ class TestAuthRequestPasswordReset:
         create_test_db.commit()
 
         # Create an old token and add it to the database.
-        old_token = VerificationToken(
+        old_token = VerificationTokenModel(
             user_id = user.id,
             token_hash = "old_hash",
             purpose = PASSWORD_RESET,
@@ -372,7 +371,7 @@ class TestAuthRequestPasswordReset:
         # The old token should be have been deleted, and there should be only 
         # the new one in the database.
 
-        tokens = create_test_db.query(VerificationToken).filter_by(
+        tokens = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user.id,
             purpose = PASSWORD_RESET
         ).all()
@@ -407,7 +406,7 @@ class TestAuthResetPassword:
         raw_token = "reset_token"
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-        verification_token = VerificationToken(
+        verification_token = VerificationTokenModel(
             user_id = user.id,
             token_hash = token_hash,
             purpose = PASSWORD_RESET,
@@ -427,7 +426,7 @@ class TestAuthResetPassword:
         assert response.status_code == status.HTTP_200_OK
 
         # Token should be marked used.
-        updated_token = create_test_db.query(VerificationToken).filter_by(
+        updated_token = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user.id
         ).first()
         assert updated_token.used is True
@@ -464,7 +463,7 @@ class TestAuthResetPassword:
         raw_token = "expired_token"
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-        verification_token = VerificationToken(
+        verification_token = VerificationTokenModel(
             user_id = user.id,
             token_hash = token_hash,
             purpose = PASSWORD_RESET,
@@ -499,7 +498,7 @@ class TestAuthResetPassword:
         raw_token = "used_token"
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-        token = VerificationToken(
+        token = VerificationTokenModel(
             user_id = user.id,
             token_hash = token_hash,
             purpose = PASSWORD_RESET,
@@ -605,7 +604,7 @@ class TestAuthLogin:
 
         # Make sure the email_verified field in the decoded access token is false.
         access_token = response.json()["access_token"]
-        decoded_token = jwt.decode(access_token, JWT_SECRET_KEY, algorithms = [JWT_ALGORITHM])
+        decoded_token = decode_access_token(access_token)
 
         assert decoded_token["email_verified"] is False
 
@@ -632,7 +631,7 @@ class TestAuthLogin:
 
         # Make sure the email_verified field in the decoded access token is true.
         access_token = response.json()["access_token"]
-        decoded_token = jwt.decode(access_token, JWT_SECRET_KEY, algorithms = [JWT_ALGORITHM])
+        decoded_token = decode_access_token(access_token)
 
         assert decoded_token["email_verified"] is True
 
@@ -666,11 +665,11 @@ class TestAuthRefresh:
         self, 
         client, 
         test_user, 
-        refresh_token_for_test_user
+        refresh_token_bundle_for_test_user
     ):
         response = client.post(
             AUTH_REFRESH_PREFIX,
-            cookies = {"refresh_token": refresh_token_for_test_user}
+            cookies = {"refresh_token": refresh_token_bundle_for_test_user["raw"]}
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -683,11 +682,13 @@ class TestAuthRefresh:
         self, 
         client,
         test_user,
-        refresh_token_for_test_user
+        refresh_token_bundle_for_test_user
     ):
+        old_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+
         response = client.post(
             AUTH_REFRESH_PREFIX,
-            cookies = {"refresh_token": refresh_token_for_test_user}
+            cookies = {"refresh_token": old_raw_refresh_token}
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -701,11 +702,11 @@ class TestAuthRefresh:
         assert set_cookie_header is not None
         assert "refresh_token=" in set_cookie_header
         # Ensure the new token is different from the old one.
-        assert new_refresh_token != refresh_token_for_test_user
+        assert new_refresh_token != old_raw_refresh_token
 
 
 # ---------------------------------------------------------
-# REFRESH
+# ME
 # ---------------------------------------------------------
 
 class TestAuthMe:

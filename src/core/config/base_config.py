@@ -11,8 +11,12 @@ class BaseConfig(BaseSettings):
     database_url: str = Field(..., alias="DATABASE_URL")
 
     # Auth
-    jwt_secret: str = Field(..., alias="JWT_SECRET")
-    jwt_expires_in: int = Field(3600, alias="JWT_EXPIRES_IN")
+    access_token_secret: str = Field(..., alias="ACCESS_TOKEN_SECRET")
+    access_token_algorithm: str = Field("HS256", alias="ACCESS_TOKEN_ALGORITHM")
+    access_token_expires_in: int = Field(3600, alias="ACCESS_TOKEN_EXPIRES_IN")
+
+    refresh_token_secret: str = Field(..., alias="REFRESH_TOKEN_SECRET")
+    refresh_token_algorithm: str = Field("HS256", alias="REFRESH_TOKEN_ALGORITHM")
 
     # CORS
     cors_origins: List[str] = Field(default_factory=list, alias="CORS_ORIGINS")

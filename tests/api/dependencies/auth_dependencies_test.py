@@ -19,12 +19,10 @@ def test_get_current_user_invalid_token(client):
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-def test_get_current_user_wrong_scope(client, test_user):
-    refresh_token = create_refresh_token(str(test_user.id), test_user.is_verified)
-
+def test_get_current_user_wrong_scope(client, test_user, refresh_token_for_test_user):
     response = client.get(
         "/auth/me",
-        cookies = {"access_token": refresh_token}
+        cookies = {"access_token": refresh_token_for_test_user}
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 

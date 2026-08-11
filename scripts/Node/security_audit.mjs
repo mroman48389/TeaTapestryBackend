@@ -55,6 +55,8 @@ const SUSPICIOUS_PATTERNS = [
     "jwt_secret",
     "JWT_SECRET",
     "SECRET_KEY",
+    "ACCESS_TOKEN_SECRET",
+    "REFRESH_TOKEN_SECRET",
 
     /* OAuth tokens */
     "ACCESS_TOKEN",

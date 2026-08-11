@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from src.db.base import Base
 
-class VerificationToken(Base):
+class VerificationTokenModel(Base):
     __tablename__ = "verification_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(

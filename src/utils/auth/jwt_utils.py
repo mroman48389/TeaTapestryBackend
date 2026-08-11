@@ -4,9 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 import jwt  
 
+from src.core.config import settings
 from src.constants.jwt_constants import (
-    JWT_SECRET_KEY,
-    JWT_ALGORITHM,
     ACCESS_TOKEN_LIFETIME_MINUTES,
     REFRESH_TOKEN_LIFETIME_DAYS
 )
@@ -27,11 +26,19 @@ def create_access_token(user_id: str, email_verified: bool) -> str:
         "exp": int(datetime_expired.timestamp()) # expiration
     }
 
-    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm = JWT_ALGORITHM)
+    token = jwt.encode(
+        payload, 
+        settings.access_token_secret, 
+        algorithm = settings.access_token_algorithm
+    )
     return token
 
 
-def create_refresh_token(user_id: str, email_verified: bool) -> str:
+def create_refresh_token(
+    user_id: str, 
+    email_verified: bool,
+    refresh_token_id: str
+) -> str:
     """
         Create a long-lived JWT refresh token.
         Stored in HttpOnly cookie.
@@ -45,19 +52,36 @@ def create_refresh_token(user_id: str, email_verified: bool) -> str:
         "email_verified": email_verified,
         "iat": int(datetime_now.timestamp()),     # issued at
         "exp": int(datetime_expired.timestamp()), # expiration
-        "jti": str(uuid.uuid4())                  # JWT ID; guarantees uniqueness
+        "jti": str(uuid.uuid4()),                 # JWT ID; guarantees uniqueness
+        "refresh_token_id": refresh_token_id
     }
 
-    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm = JWT_ALGORITHM)
+    token = jwt.encode(
+        payload, 
+        settings.refresh_token_secret, 
+        algorithm = settings.refresh_token_algorithm
+    )
     return token
 
 
-def decode_token(token: str) -> Dict[str, Any]:
+def decode_access_token(token: str) -> Dict[str, Any]:
     """
         Decode and verify a JWT. Verifies signature, expiration, algorithm.
         Raises jwt.ExpiredSignatureError if expired and jwt.InvalidTokenError if invalid.
     """
-    return jwt.decode(token, JWT_SECRET_KEY, algorithms = [JWT_ALGORITHM])
+    return jwt.decode(
+        token,         
+        settings.access_token_secret, 
+        algorithms = [settings.access_token_algorithm]
+    )
+
+
+def decode_refresh_token(token: str) -> Dict[str, Any]:
+    return jwt.decode(
+        token,         
+        settings.refresh_token_secret, 
+        algorithms = [settings.refresh_token_algorithm]
+    )
 
 
 def token_expired(payload: Dict[str, Any]) -> bool:

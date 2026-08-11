@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 
 from src.utils.log_utils import safe_debug, safe_info
-from src.db.models.verification_token_model import VerificationToken
+from src.db.models.verification_token_model import VerificationTokenModel
 from src.constants.app_constants import FRONTEND_BASE_URL
 
 def create_raw_verification_token(user, session, purpose, expiration_minutes = 30):
@@ -17,7 +17,7 @@ def create_raw_verification_token(user, session, purpose, expiration_minutes = 3
     expires_at = datetime.now(timezone.utc) + timedelta(minutes = expiration_minutes)
 
     # Create the verification token.
-    verification_token = VerificationToken(
+    verification_token = VerificationTokenModel(
         user_id = user.id,
         token_hash = hashed_token,
         expires_at = expires_at,
