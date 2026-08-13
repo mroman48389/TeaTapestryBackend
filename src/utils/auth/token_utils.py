@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 
 from src.utils.log_utils import safe_debug, safe_info
-from src.db.models.verification_token_model import VerificationTokenModel
+from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.constants.app_constants import FRONTEND_BASE_URL
 
 def create_raw_verification_token(user, session, purpose, expiration_minutes = 30):

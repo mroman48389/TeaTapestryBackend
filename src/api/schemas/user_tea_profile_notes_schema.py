@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from uuid import UUID
 
@@ -26,8 +26,7 @@ class UserTeaProfileNotesBaseSchema(BaseModel):
 class UserTeaProfileNotesInboundSchema(UserTeaProfileNotesBaseSchema):
     
     # Prevent client from adding extra fields.
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra = "forbid")
 
 class UserTeaProfileNotesOutboundSchema(UserTeaProfileNotesBaseSchema):
     id: UUID
@@ -35,5 +34,5 @@ class UserTeaProfileNotesOutboundSchema(UserTeaProfileNotesBaseSchema):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    # Prevent client from adding extra fields.
+    model_config = ConfigDict(from_attributes = True)

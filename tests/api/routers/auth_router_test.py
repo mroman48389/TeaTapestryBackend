@@ -3,7 +3,8 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import hashlib
 
-from src.db.models.user_models import UserInternalModel
+from src.db.models.auth.user_models import UserInternalModel
+from src.db.models.auth.session_token_model import SessionTokenModel
 from src.utils.auth.password_utils import verify_password, hash_password
 from src.constants.route_constants import (
     AUTH_SIGNUP_PREFIX,
@@ -16,12 +17,14 @@ from src.constants.route_constants import (
     AUTH_REFRESH_PREFIX,
     AUTH_ME_PREFIX
 )
-from src.db.models.verification_token_model import VerificationTokenModel
+from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET,
 )
-from src.utils.auth.jwt_utils import decode_access_token
+from src.utils.auth.jwt_utils import (
+    decode_access_token
+)
 from tests.utils.test_utils import fake_create_token_factory
 
 # ---------------------------------------------------------
@@ -604,9 +607,9 @@ class TestAuthLogin:
 
         # Make sure the email_verified field in the decoded access token is false.
         access_token = response.json()["access_token"]
-        decoded_token = decode_access_token(access_token)
+        payload = decode_access_token(access_token)
 
-        assert decoded_token["email_verified"] is False
+        assert payload.email_verified is False
 
 
     def test_login_includes_email_verified_true(self, client, create_test_db):
@@ -631,9 +634,9 @@ class TestAuthLogin:
 
         # Make sure the email_verified field in the decoded access token is true.
         access_token = response.json()["access_token"]
-        decoded_token = decode_access_token(access_token)
+        payload = decode_access_token(access_token)
 
-        assert decoded_token["email_verified"] is True
+        assert payload.email_verified is True
 
 
 # ---------------------------------------------------------
@@ -641,6 +644,30 @@ class TestAuthLogin:
 # ---------------------------------------------------------
 
 class TestAuthLogout:
+
+    def test_logout_revokes_session(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        hashed_refresh_token = refresh_token_bundle_for_test_user["hashed"]
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+        response = client.post(AUTH_LOGOUT_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        # Make sure the session row is revoked.
+        session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.refresh_token_hash == hashed_refresh_token
+        ).first()
+
+        assert session_token is not None
+        assert session_token.revoked_at is not None
+
 
     def test_logout_deletes_cookie(self, client):
         response = client.post(AUTH_LOGOUT_PREFIX)
@@ -650,7 +677,7 @@ class TestAuthLogout:
 
         assert set_cookie_header is not None
         assert "refresh_token=" in set_cookie_header
-        assert "Max-Age=0" in set_cookie_header or "expires=" in set_cookie_header
+        assert ("Max-Age=0" in set_cookie_header) or ("expires=" in set_cookie_header)
 
         assert response.json()["message"] == "Logged out"
 
@@ -667,10 +694,8 @@ class TestAuthRefresh:
         test_user, 
         refresh_token_bundle_for_test_user
     ):
-        response = client.post(
-            AUTH_REFRESH_PREFIX,
-            cookies = {"refresh_token": refresh_token_bundle_for_test_user["raw"]}
-        )
+        client.cookies.set("refresh_token", refresh_token_bundle_for_test_user["raw"])
+        response = client.post(AUTH_REFRESH_PREFIX)
 
         assert response.status_code == status.HTTP_200_OK
 
@@ -686,10 +711,8 @@ class TestAuthRefresh:
     ):
         old_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
 
-        response = client.post(
-            AUTH_REFRESH_PREFIX,
-            cookies = {"refresh_token": old_raw_refresh_token}
-        )
+        client.cookies.set("refresh_token", old_raw_refresh_token)
+        response = client.post(AUTH_REFRESH_PREFIX)
 
         assert response.status_code == status.HTTP_200_OK
 
@@ -704,6 +727,51 @@ class TestAuthRefresh:
         # Ensure the new token is different from the old one.
         assert new_refresh_token != old_raw_refresh_token
 
+    def test_refresh_detects_token_reuse(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # As a reminder, token reuse just means that a different refresh token than the one 
+        # original associated with the session is being used. 
+        # 
+        
+        # First, we call the refresh endpoint with our original test token in order to rotate it.
+        original_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+
+        client.cookies.set("refresh_token", original_raw_refresh_token)
+        first_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert first_response.status_code == status.HTTP_200_OK
+
+        # Extract the new refresh token from Set-Cookie. It should be different than the original
+        # if the refresh endpoint rotated it properly.
+        set_cookie_headers = first_response.headers.get_list("set-cookie")
+        new_refresh_cookie = next(h for h in set_cookie_headers if "refresh_token=" in h)
+        new_raw_refresh_token = new_refresh_cookie.split("refresh_token=")[1].split(";")[0]
+
+        assert new_raw_refresh_token != original_raw_refresh_token
+
+        # Call the refresh endpoint again using the same original refresh token to trigger 
+        # reuse detection. We need to clear the cookies first so starlette doesn't merge them or
+        # leave behind anything from the first send.
+        client.cookies.clear()
+        client.cookies.set("refresh_token", original_raw_refresh_token)
+        second_response = client.post(AUTH_REFRESH_PREFIX)
+
+        # The endpoint should revoke all sessions for our test user.
+        assert second_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert second_response.json()["detail"] == "Refresh token reuse detected. All sessions revoked."
+
+        user_sessions = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == test_user.id
+        ).all()
+
+        assert len(user_sessions) > 0
+        for s in user_sessions:
+            assert s.revoked_at is not None
 
 # ---------------------------------------------------------
 # ME
@@ -717,10 +785,8 @@ class TestAuthMe:
         test_user, 
         access_token_for_test_user
     ):
-        response = client.get(
-            AUTH_ME_PREFIX,
-            cookies = {"access_token": access_token_for_test_user}
-        )
+        client.cookies.set("access_token", access_token_for_test_user)
+        response = client.get(AUTH_ME_PREFIX)
 
         data = response.json()
 

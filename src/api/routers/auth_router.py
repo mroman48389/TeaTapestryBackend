@@ -10,22 +10,37 @@ from fastapi.responses import JSONResponse
 
 from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.session_utils import get_session
-from src.db.models.user_models import UserInternalModel
-from src.db.models.session_token_model import SessionTokenModel
-from src.api.schemas.user_schema import (
+from src.db.models.auth.user_models import UserInternalModel
+from src.db.models.auth.session_token_model import SessionTokenModel
+from src.api.schemas.auth.user_schema import (
     UserInboundSchema,
     UserOutboundSchema,
-    LoginSchema
 )
-from src.api.schemas.password_reset_schema import (
+from src.api.schemas.auth.login_schema import (
+    LoginSchema,
+    LoginResponseSchema
+)
+from src.api.schemas.auth.logout_schema import (
+    LogoutResponseSchema,
+    LogoutAllResponseSchema
+)
+from src.api.schemas.auth.password_reset_schema import (
     PasswordResetRequestSchema, 
+    PasswordResetRequestResponseSchema,
     PasswordResetSubmissionSchema,
+    PasswordResetSubmissionResponseSchema
 )
-from src.api.schemas.session_schema import (
+from src.api.schemas.auth.session_schema import (
     ActiveSessionSchema,
-    ActiveSessionsResponse,
-    TerminateSessionResponse
+    ActiveSessionsResponseSchema,
+    TerminateSessionResponseSchema
 )
+from src.api.schemas.auth.email_verification_schema import (
+    VerifyEmailResponseSchema,
+    SendVerificationResponseSchema
+)
+from src.api.schemas.auth.refresh_schema import RefreshResponseSchema
+from src.api.schemas.auth.me_schema import MeResponseSchema
 from src.api.dependencies.auth_dependencies import get_current_user
 from src.utils.auth.password_utils import (
     hash_password, 
@@ -71,7 +86,7 @@ from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET
 )
-from src.db.models.verification_token_model import VerificationTokenModel
+from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.utils.request_metadata_utils import (
     get_client_ip,
     get_user_agent
@@ -198,7 +213,11 @@ def signup(
 #     5. (Optional) Try calling verify_email again with the same token. It should now fail
 #        because the token has already been used.
 
-@router.post(f"/{SEND_VERIFICATION}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{SEND_VERIFICATION}", 
+    status_code = status.HTTP_200_OK,
+    response_model = SendVerificationResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def send_verification(
     request: Request,
@@ -226,16 +245,17 @@ def send_verification(
     # Create a new token.
     raw_token = create_raw_verification_token(current_user, session, EMAIL_VERIFICATION)
 
-    #TODO: remove
-    safe_debug(f"DEV VERIFICATION TOKEN: {raw_token}")
-
     # Send (print) the verification link.
     send_verification_email(current_user, raw_token)
 
-    return {"message": "Verification email sent."}
+    return SendVerificationResponseSchema(message = "Verification email sent.")
 
 
-@router.post(f"/{VERIFY_EMAIL}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{VERIFY_EMAIL}", 
+    status_code = status.HTTP_200_OK,
+    response_model = VerifyEmailResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def verify_email(
     request: Request,
@@ -307,7 +327,7 @@ def verify_email(
 
     session.commit()
 
-    return {"message": "Email verified successfully."}
+    return VerifyEmailResponseSchema(message = "Email verified successfully.")
 
 
 # Postman test steps for testing request_password_reset and reset_password:
@@ -344,7 +364,11 @@ def verify_email(
 #     4. Try the login endpoint with the new password and then again with the old password. The 
 #        former should work, the latter should fail.
 #
-@router.post(f"/{REQUEST_PASSWORD_RESET}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{REQUEST_PASSWORD_RESET}", 
+    status_code = status.HTTP_200_OK,
+    response_model = PasswordResetRequestResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def request_password_reset(
     request: Request,
@@ -371,7 +395,7 @@ def request_password_reset(
         # database, and returning 404 or 400.
         request_password_reset_msg = "If the email exists, a reset link has been sent."
         if not user:
-            return {"message": request_password_reset_msg}
+            return PasswordResetRequestResponseSchema(message =  request_password_reset_msg)
 
         # Delete old password reset verification tokens for the user.
         session.query(VerificationTokenModel).filter(
@@ -392,10 +416,14 @@ def request_password_reset(
 
         send_password_reset_email(user, raw_token)
 
-        return {"message": request_password_reset_msg}
+        return PasswordResetRequestResponseSchema(message = request_password_reset_msg)
 
 
-@router.post(f"/{RESET_PASSWORD}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{RESET_PASSWORD}", 
+    status_code = status.HTTP_200_OK,
+    response_model = PasswordResetSubmissionResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def reset_password(
     request: Request,
@@ -491,78 +519,14 @@ def reset_password(
 
         session.commit()
 
-        return {"message": "Password reset successfully."}
+        return PasswordResetSubmissionResponseSchema(message = "Password reset successfully.")
 
 
-# @router.post(f"/{LOGIN}", status_code = status.HTTP_200_OK)
-# @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
-# def login(
-#     request: Request,
-#     payload: LoginSchema,
-#     response: Response,
-#     session: Session = Depends(get_session)
-# ):
-#     with sentry_sdk.start_span(op = AUTH, name = "login"):
-#         sentry_sdk.set_tag("endpoint", "login")
-
-#         # Prevent caching
-#         response.headers["Cache-Control"] = "no-store"
-
-#         # Look up the user.
-#         user = session.query(UserInternalModel).filter(
-#             UserInternalModel.email == payload.email
-#         ).first()
-
-#         # If they were not found, don't authorize.
-#         if (not user) or (not verify_password(payload.password, user.hashed_password)):
-#             raise HTTPException(
-#                 status_code = status.HTTP_401_UNAUTHORIZED,
-#                 detail = "Invalid email or password."
-#             )
-
-#         # Generate tokens.
-#         access_token = create_access_token(str(user.id), user.is_verified)
-#         refresh_token = create_refresh_token(str(user.id), user.is_verified)
-
-#         # Determine cookie security based on environment. Allows us to ignore
-#         # secure cookies, which do not work over http (we run locally over http and
-#         # production over https).
-#         hostname = request.url.hostname
-#         is_local = hostname in ("localhost", "127.0.0.1", "testserver")
-
-#         response = JSONResponse(
-#             content = {
-#                 "access_token": access_token,
-#                 "token_type": "bearer"
-#             }
-#         )
-
-#         # Set refresh token cookie. max_age is the number of seconds the browser 
-#         # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
-#         # (60 sec / min)
-#         response.set_cookie(
-#             key = "refresh_token",
-#             value = refresh_token,
-#             httponly = True,
-#             secure = not is_local,
-#             samesite = "lax",
-#             path = "/",
-#             max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
-#         )
-
-#         response.set_cookie(
-#             key = "access_token",
-#             value = access_token,
-#             httponly = True,
-#             secure = not is_local,
-#             samesite = "lax",
-#             path = "/",
-#             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
-#         )
-
-#         return response
-
-@router.post(f"/{LOGIN}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{LOGIN}", 
+    status_code = status.HTTP_200_OK,
+    response_model = LoginResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def login(
     request: Request,
@@ -626,12 +590,12 @@ def login(
         hostname = request.url.hostname
         is_local = hostname in ("localhost", "127.0.0.1", "testserver")
 
-        response = JSONResponse(
-            content = {
-                "access_token": access_token,
-                "token_type": "bearer"
-            }
+        body = LoginResponseSchema(
+            access_token = access_token,
+            token_type = "bearer"
         )
+
+        response = JSONResponse(content = body.model_dump())
 
         # Set refresh token cookie. max_age is the number of seconds the browser 
         # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
@@ -660,7 +624,11 @@ def login(
         return response
 
 
-@router.post(f"/{LOGOUT}")
+@router.post(
+    f"/{LOGOUT}",
+    status_code = status.HTTP_200_OK,
+    response_model = LogoutResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def logout(
     request: Request,
@@ -704,10 +672,14 @@ def logout(
 
         delete_auth_token_cookies(request, response)
 
-        return {"message": "Logged out"}
+        return LogoutResponseSchema(message = "Logged out")
 
 
-@router.post(f"/{LOGOUT_ALL}")
+@router.post(
+    f"/{LOGOUT_ALL}",
+    status_code = status.HTTP_200_OK,
+    response_model = LogoutAllResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def logout_all(
     request: Request,
@@ -730,7 +702,7 @@ def logout_all(
             # Cookies may still exist even if raw_refresh_token is None.
             delete_auth_token_cookies(request, response)
 
-            return {"message": "Logged out of all devices."}
+            return LogoutAllResponseSchema(message = "Logged out of all devices.")
 
         # Otherwise, hash the refresh token and use it to get the session token for 
         # this session.
@@ -745,7 +717,7 @@ def logout_all(
         if not session_token:
             delete_auth_token_cookies(request, response)
 
-            return {"message": "Logged out of all devices."}
+            return LogoutAllResponseSchema(message = "Logged out of all devices.")
 
         # Otherwise, we found a session. Since it has a user id, we can use it to revoke 
         # all sessions for this user.
@@ -782,10 +754,14 @@ def logout_all(
 
         delete_auth_token_cookies(request, response)
 
-        return {"message": "Logged out of all devices."}
+        return LogoutAllResponseSchema(message = "Logged out of all devices.")
     
 
-@router.get(f"/{ACTIVE_SESSIONS}", response_model = ActiveSessionsResponse)
+@router.get(
+    f"/{ACTIVE_SESSIONS}", 
+    status_code = status.HTTP_200_OK,
+    response_model = ActiveSessionsResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def get_active_sessions(
     request: Request,
@@ -817,7 +793,7 @@ def get_active_sessions(
             for s in user_sessions
         ]
 
-        return ActiveSessionsResponse(sessions = sessions_list)
+        return ActiveSessionsResponseSchema(sessions = sessions_list)
 
 
 # Note that we inject UserInternalModel in endpoints that require authentication to have
@@ -825,7 +801,11 @@ def get_active_sessions(
 #
 # The session_id must be a param in terminate_session as well because we are using it as 
 # a path parameter in the URL.
-@router.post(f"/{TERMINATE_SESSION}/{{session_id}}", response_model = TerminateSessionResponse)
+@router.post(
+    f"/{TERMINATE_SESSION}/{{session_id}}", 
+    status_code = status.HTTP_200_OK,
+    response_model = TerminateSessionResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def terminate_session(
     session_id: uuid.UUID,
@@ -854,114 +834,21 @@ def terminate_session(
 
         # If already revoked, nothing to do.
         if session_token.revoked_at is not None:
-            return TerminateSessionResponse(message = "Session already terminated.")
+            return TerminateSessionResponseSchema(message = "Session already terminated.")
 
         # Otherwise, revoke the session.
         session_token.revoked_at = datetime.now(timezone.utc)
 
         session.commit()
 
-        return TerminateSessionResponse(message = "Session terminated successfully.")
+        return TerminateSessionResponseSchema(message = "Session terminated successfully.")
 
 
-# @router.post(f"/{REFRESH}", status_code = status.HTTP_200_OK)
-# @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
-# def refresh_token(
-#     request: Request,
-#     response: Response,
-#     session: Session = Depends(get_session)
-# ):
-#     with sentry_sdk.start_span(op = AUTH, name = "refresh_token"):
-#         sentry_sdk.set_tag("endpoint", "refresh_token")
-
-#         # When the access token expires after about 15 minutes on the frontend, it
-#         # can call this endpoint to read the refresh token from the HttpOnly cookie.
-#         # We'll decode and validate it, ensure the scope is "refresh", and issue a 
-#         # new access token (returned as JSON).
-#         #
-#         # Refresh tokens live in cookies because cookies persist across browser restarts
-#         # and page reloads. Since they are HttpOnly, JavaScript can't be used to steal
-#         # them. They have CSRF (cross-site request forgery) protection, since they are 
-#         # SameSite strict.
-
-#         # Make sure the refresh token is in the cookie.
-#         refresh_token = request.cookies.get("refresh_token")
-#         if not refresh_token:
-#             raise HTTPException(
-#                 status_code = status.HTTP_401_UNAUTHORIZED,
-#                 detail = "Missing refresh token."
-#             )
-
-#         # Decode and validate the refresh token.
-#         try:
-#             payload = decode_token(refresh_token)
-
-#         except Exception:
-#             raise HTTPException(
-#                 status_code = status.HTTP_401_UNAUTHORIZED,
-#                 detail = "Invalid or expired refresh token."
-#             )
-
-#         # Ensure the token is a refresh token.
-#         if payload.get("scope") != "refresh":
-#             raise HTTPException(
-#                 status_code = status.HTTP_401_UNAUTHORIZED,
-#                 detail = "Invalid token scope."
-#             )
-
-#         user_id = uuid.UUID(payload.get("sub"))
-
-#         # Ensure the user exists.
-#         user = session.query(UserInternalModel).filter(
-#             UserInternalModel.id == user_id
-#         ).first()
-
-#         if not user:
-#             raise HTTPException(
-#                 status_code = status.HTTP_401_UNAUTHORIZED,
-#                 detail = "User no longer exists."
-#             )
-
-#         # Issue a new access token.
-#         new_access_token = create_access_token(str(user.id), user.is_verified)
-
-#         # Issue a new refresh token (rotate the token). Prevents stolen 
-#         # refresh tokens from being reused.
-#         new_refresh_token = create_refresh_token(str(user.id), user.is_verified)
-
-#         hostname = request.url.hostname
-#         is_local = hostname in ("localhost", "127.0.0.1", "testserver")
-
-#         response = JSONResponse(
-#             content = {
-#                 "access_token": new_access_token,
-#                 "token_type": "bearer"
-#             }
-#         )
-
-#         response.set_cookie(
-#             key = "refresh_token",
-#             value = new_refresh_token,
-#             httponly = True,
-#             secure = not is_local,
-#             samesite = "lax",
-#             path = "/",
-#             max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
-#         )
-
-#         response.set_cookie(
-#             key = "access_token",
-#             value = new_access_token,
-#             httponly = True,
-#             secure = not is_local,
-#             samesite = "lax",
-#             path = "/",
-#             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
-#         )
-
-#         return response
-
-@router.post(f"/{REFRESH}", status_code = status.HTTP_200_OK)
+@router.post(
+    f"/{REFRESH}", 
+    status_code = status.HTTP_200_OK,
+    response_model = RefreshResponseSchema
+)
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def refresh_token(
     request: Request,
@@ -994,17 +881,27 @@ def refresh_token(
                 detail = "Missing refresh token."
             )
 
-        # Hash the refresh token.
-        hashed_refresh_token = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+        # Extract the refresh_token_id and user_id from the raw refresh token.
+        try:
+            payload = decode_refresh_token(raw_refresh_token)
+            incoming_refresh_token_id = payload.refresh_token_id
+            incoming_user_id = payload.sub
 
-        # Use the hashed refresh token to get a session token from the database.
+        except Exception:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid refresh token format."
+            )
+
+        # Look up the current active session for this user.
         session_token = session.query(SessionTokenModel).filter(
-            SessionTokenModel.refresh_token_hash == hashed_refresh_token
+            SessionTokenModel.user_id == incoming_user_id,
+            SessionTokenModel.revoked_at.is_(None)
         ).first()
 
         if not session_token:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+                status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "Invalid refresh token."
             )
 
@@ -1041,18 +938,9 @@ def refresh_token(
 
         # The user should exist. Rotate the refresh token.
 
-        # Extract the refresh_token_id from the raw refresh token.
-        try:
-            payload = decode_refresh_token(raw_refresh_token)
-            incoming_refresh_token_id = uuid.UUID(payload["refresh_token_id"])
-
-        except Exception:
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid refresh token format."
-            )
-
         # Detect token reuse. Compare the incoming refresh token ID to the stored one.
+        # Token reuse means that the refresh token is not the same one the session had
+        # before.
         if incoming_refresh_token_id != session_token.refresh_token_id:
             # The refresh token was stolen or reused if we make it here!
             # Revoke ALL sessions for this user.
@@ -1120,12 +1008,12 @@ def refresh_token(
         hostname = request.url.hostname
         is_local = hostname in ("localhost", "127.0.0.1", "testserver")
 
-        response = JSONResponse(
-            content = {
-                "access_token": new_access_token,
-                "token_type": "bearer"
-            }
+        body = RefreshResponseSchema(
+            access_token = new_access_token,
+            token_type = "bearer"
         )
+
+        response = JSONResponse(content = body.model_dump())
 
         response.set_cookie(
             key = "refresh_token",
@@ -1150,7 +1038,11 @@ def refresh_token(
         return response
 
 
-@router.get(f"/{ME}")
+@router.get(
+    f"/{ME}",
+    status_code = status.HTTP_200_OK,
+    response_model = MeResponseSchema
+)
 @rate_limiter.limit(LOW_RATE_LIMIT)
 def get_me(
     request: Request,
@@ -1164,8 +1056,8 @@ def get_me(
         # The frontend does not store tokens; the browser sends cookies 
         # automatically, and the backend derives identity from them.
 
-        return {
-            "id": current_user.id,
-            "email": current_user.email,
-            "created_at": current_user.created_at
-        }
+        return MeResponseSchema(
+            id = current_user.id,
+            email = current_user.email,
+            created_at = current_user.created_at
+        )

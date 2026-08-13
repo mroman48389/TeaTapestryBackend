@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 # Inbound schema for requesting a password reset. The client will send an email. 
 # No outbound representation is needed. The server will only return a success message.
@@ -6,8 +6,10 @@ class PasswordResetRequestSchema(BaseModel):
     email: EmailStr
 
     # Prevent client from adding extra fields.
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra = "forbid")
+
+class PasswordResetRequestResponseSchema(BaseModel):
+    message: str
 
 # Inbound schema for submitting a password reset. The client will send the token 
 # and new password. No outbound representation is needed.  The sever will only return 
@@ -19,5 +21,7 @@ class PasswordResetSubmissionSchema(BaseModel):
     new_password: str = Field(..., min_length = 8)
 
     # Prevent client from adding extra fields.
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra = "forbid")
+
+class PasswordResetSubmissionResponseSchema(BaseModel):
+    message: str

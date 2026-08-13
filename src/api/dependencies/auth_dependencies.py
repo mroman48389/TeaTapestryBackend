@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from src.utils.session_utils import get_session
-from src.db.models.user_models import UserInternalModel
+from src.db.models.auth.user_models import UserInternalModel
 from src.utils.auth.jwt_utils import decode_access_token
 
 def get_current_user(
@@ -30,14 +30,14 @@ def get_current_user(
         )
 
     # Make sure it's an access token.
-    if payload.get("scope") != "access":
+    if payload.scope != "access":
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED, 
             detail = "Invalid token scope."
         )
 
     # Get the user.
-    user_id = uuid.UUID(payload.get("sub"))
+    user_id = payload.sub
 
     user = session.query(UserInternalModel).filter(
         UserInternalModel.id == user_id

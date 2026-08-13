@@ -15,9 +15,9 @@ class ActiveSessionSchema(BaseModel):
     user_agent: Optional[str]
     ip_address: Optional[str]
 
-class ActiveSessionsResponse(BaseModel):
+class ActiveSessionsResponseSchema(BaseModel):
     sessions: List[ActiveSessionSchema]
 
 # Used to terminate a specific session.
-class TerminateSessionResponse(BaseModel):
+class TerminateSessionResponseSchema(BaseModel):
     message: str

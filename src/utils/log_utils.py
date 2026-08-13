@@ -1,7 +1,7 @@
 import logging
 import inspect
 
-from src.core.env import IS_LOCAL_ENV
+from src.core.env import IS_LOCAL_ENV, IS_RUNNING_TESTS
 
 def _get_caller_logger():
     # stack()[1] = safe_x
@@ -21,7 +21,7 @@ def safe_debug(message: str):
         Debug logs that should only appear in development (locally).
         Prevents leaking sensitive data in production.
     """
-    if IS_LOCAL_ENV:
+    if IS_LOCAL_ENV or IS_RUNNING_TESTS:
         logger = _get_caller_logger()
         logger.debug(message)
 

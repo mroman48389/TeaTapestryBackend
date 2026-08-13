@@ -9,7 +9,7 @@ from src.core.config import settings
 # statement to the console.
 engine = create_engine(
     settings.database_url, 
-    echo = True,
+    echo = False, # Remove all the verbose SQLAlchemy statements when tests are run.
     pool_pre_ping = True, # test connections before using them
     pool_recycle = 300 # force SQLAlchemy to drop stale connections
 )

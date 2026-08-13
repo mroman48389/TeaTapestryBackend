@@ -17,7 +17,7 @@ from src.db.repositories.user_tea_profile_notes_repository import (
 )
 from src.utils.session_utils import get_session
 from src.api.dependencies.auth_dependencies import get_current_user
-from src.db.models.user_models import UserInternalModel
+from src.db.models.auth.user_models import UserInternalModel
 from src.core.rate_limit.config_rate_limit import (
     HIGH_RATE_LIMIT, 
     LOW_RATE_LIMIT, 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from datetime import datetime
 from uuid import UUID
 
@@ -21,8 +21,8 @@ class UserInternalSchema(BaseModel):
     is_verified: bool
     verified_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes = True)
+
 
 # Exposed to the client. Purely for when the user is signing up for an account. Intentionally 
 # minimal and strict so the client cannot inject fields and security is maintained.
@@ -40,8 +40,7 @@ class UserInboundSchema(BaseModel):
     )
 
     # Prevent client from adding extra fields.
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra = "forbid")
 
 
 # Exposed to the client. Public API contract used when the API returns a user object 
@@ -62,14 +61,4 @@ class UserOutboundSchema(BaseModel):
     created_at: datetime
     verified_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
-
-# Mirrors UserInboundSchema, but separate for clarity.
-class LoginSchema(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length = 8)
-
-    # Prevent client from adding extra fields.
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(from_attributes = True)

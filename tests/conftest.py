@@ -17,19 +17,31 @@ from sqlalchemy.orm import sessionmaker
 import uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
+from src.core.config import settings
 # import tracemalloc
+
+import logging
+
+# Remove the verbose SQL statements we don't care about from the TERMINAL 
+# output.
+logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
 from src.app.main import app
 from src.db.base import Base
 # SQLAlchemy only creates tables for models that have been imported into memory. 
 from src.db.models.tea_profiles_model import TeaProfileModel 
-from src.db.models.user_models import UserInternalModel # noqa: F401
+from src.db.models.auth.user_models import UserInternalModel # noqa: F401
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel
-from src.db.models.session_token_model import SessionTokenModel
+from src.db.models.auth.session_token_model import SessionTokenModel
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.utils.auth.password_utils import hash_password
-from src.utils.auth.jwt_utils import create_access_token, create_refresh_token
+from src.utils.auth.jwt_utils import (
+    create_access_token, 
+    create_refresh_token, 
+    decode_refresh_token
+)
 from tests.utils.test_utils import get_empty_user_tea_profile_notes_body
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 from src.constants.jwt_constants import REFRESH_TOKEN_LIFETIME_DAYS
@@ -252,21 +264,21 @@ def refresh_token_for_test_user(test_user):
 # session in the database is required.
 @pytest.fixture
 def refresh_token_bundle_for_test_user(test_user, create_test_db):
-    refresh_token_id = uuid.uuid4()
-
     raw_refresh_token = create_refresh_token(
         user_id = str(test_user.id),
         email_verified = test_user.is_verified,
-        refresh_token_id = str(refresh_token_id)
+        refresh_token_id = str(uuid.uuid4())
     )
 
-    hashed_refresh_token = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+    payload = decode_refresh_token(raw_refresh_token)
+    refresh_token_id = payload.refresh_token_id
+    refresh_token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
 
     now = datetime.now(timezone.utc)
 
     session_token = SessionTokenModel(
         user_id = test_user.id,
-        refresh_token_hash = hashed_refresh_token,
+        refresh_token_hash = refresh_token_hash,
         refresh_token_id = refresh_token_id,
         created_at = now,
         expires_at = now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS),
@@ -280,6 +292,6 @@ def refresh_token_bundle_for_test_user(test_user, create_test_db):
 
     return {
         "raw": raw_refresh_token,
-        "hashed": hashed_refresh_token,
+        "hashed": refresh_token_hash,
         "id": refresh_token_id,
     }

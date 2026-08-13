@@ -2,6 +2,7 @@ import sentry_sdk
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 from fastapi import Request, FastAPI
+from starlette import status
 
 # Now doing on each route.
 # Set up global rate limit The function name is not important. We'll get a 
@@ -20,17 +21,17 @@ def register_rate_limit_handlers(app: FastAPI):
         # well.
         sentry_sdk.capture_message(
             f"Rate limit exceeded for {request.url.path}",
-            level="warning"
+            level = "warning"
         )
 
         return JSONResponse(
-            status_code = 429,
-            content={
+            status_code = status.HTTP_429_TOO_MANY_REQUESTS,
+            content = {
                 "error": {
                     "type": "RateLimitExceeded",
                     "message": "Too many requests",
                     "details": None,
-                    "status": 429,
+                    "status": status.HTTP_429_TOO_MANY_REQUESTS,
                     "path": request.url.path,
                 }
             },
