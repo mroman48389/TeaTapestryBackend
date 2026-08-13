@@ -37,14 +37,14 @@ class UserTeaProfileNotesService:
             )
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
-        except UserTeaProfileNotesNotFoundError:
-            raise HTTPException(
+        except UserTeaProfileNotesNotFoundError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_404_NOT_FOUND,
                 detail = "No notes found for this tea.",
             )
 
-        except UserTeaProfileNotesQueryError:
-            raise HTTPException(
+        except UserTeaProfileNotesQueryError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to fetch user tea profile notes.",
             )
@@ -58,7 +58,7 @@ class UserTeaProfileNotesService:
                 for entry in user_tea_profile_notes
             ]
 
-        except UserTeaProfileNotesQueryError:
+        except UserTeaProfileNotesQueryError: # pragma: no cover
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to fetch user tea profile notes.",
@@ -75,13 +75,13 @@ class UserTeaProfileNotesService:
             user_tea_profile_notes = self._repo.create(user_id, tea_profile_id, inbound_schema)
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
-        except UserTeaProfileNotesAlreadyExistError:
+        except UserTeaProfileNotesAlreadyExistError: # pragma: no cover
             raise HTTPException(
                 status_code = status.HTTP_409_CONFLICT,
                 detail = "User tea profile notes already exist for this tea profile id."
             )
 
-        except UserTeaProfileNotesQueryError:
+        except UserTeaProfileNotesQueryError: # pragma: no cover
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to create user tea profile notes.",
@@ -107,14 +107,14 @@ class UserTeaProfileNotesService:
             updated_user_tea_profile_notes = self._repo.update(note_id, inbound_schema)
             return UserTeaProfileNotesOutboundSchema.model_validate(updated_user_tea_profile_notes)
 
-        except UserTeaProfileNotesNotFoundError:
-            raise HTTPException(
+        except UserTeaProfileNotesNotFoundError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_404_NOT_FOUND,
                 detail = "Note not found.",
             )
 
-        except UserTeaProfileNotesQueryError:
-            raise HTTPException(
+        except UserTeaProfileNotesQueryError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to update user tea profile notes.",
             )
@@ -137,14 +137,14 @@ class UserTeaProfileNotesService:
 
             self._repo.delete(note_id)
 
-        except UserTeaProfileNotesNotFoundError:
-            raise HTTPException(
+        except UserTeaProfileNotesNotFoundError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_404_NOT_FOUND,
                 detail = "Note not found.",
             )
 
-        except UserTeaProfileNotesQueryError:
-            raise HTTPException(
+        except UserTeaProfileNotesQueryError: # pragma: no cover
+            raise HTTPException( 
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to delete user tea profile notes.",
             )

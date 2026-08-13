@@ -14,6 +14,9 @@ from src.constants.route_constants import (
     AUTH_REQUEST_PASSWORD_RESET_PREFIX,
     AUTH_RESET_PASSWORD_PREFIX,
     AUTH_LOGOUT_PREFIX,
+    AUTH_LOGOUT_ALL_PREFIX,
+    AUTH_ACTIVE_SESSIONS_PREFIX,
+    AUTH_TERMINATE_SESSION_PREFIX,
     AUTH_REFRESH_PREFIX,
     AUTH_ME_PREFIX
 )
@@ -23,6 +26,7 @@ from src.constants.token_constants import (
     PASSWORD_RESET,
 )
 from src.utils.auth.jwt_utils import (
+    create_access_token,
     decode_access_token
 )
 from tests.utils.test_utils import fake_create_token_factory
@@ -683,6 +687,228 @@ class TestAuthLogout:
 
 
 # ---------------------------------------------------------
+# LOGOUT ALL
+# ---------------------------------------------------------
+
+class TestAuthLogoutAll:
+
+    def test_logout_all_without_cookie_succeeds_and_deletes_cookies(
+        self,
+        client,
+        test_user,
+        create_test_db
+    ):
+        # Purposefully don't set a refresh token cookie so we can ensure
+        # the endpoint still succeeds and deletes auth cookies.
+        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["message"] == "Logged out of all devices."
+
+        set_cookie_headers = response.headers.get_list("set-cookie")
+
+        # The response should delete both cookies and make them expired.
+
+        assert any("refresh_token=" in h for h in set_cookie_headers)
+        assert any("access_token=" in h for h in set_cookie_headers)
+        assert any("Max-Age=0" in h or "expires=" in h for h in set_cookie_headers)
+
+
+    def test_logout_all_with_invalid_refresh_token_deletes_cookies(
+        self,
+        client,
+        test_user,
+        create_test_db
+    ):
+        # Set a refresh token cookie that does NOT correspond to any session.
+        client.cookies.set("refresh_token", "fake token")
+
+        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["message"] == "Logged out of all devices."
+
+        # The response should delete both cookies.
+        set_cookie_headers = response.headers.get_list("set-cookie")
+
+        assert any("refresh_token=" in h for h in set_cookie_headers)
+        assert any("access_token=" in h for h in set_cookie_headers)
+        assert any("Max-Age=0" in h or "expires=" in h for h in set_cookie_headers)
+
+        # No sessions should be revoked.
+        user_sessions = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == test_user.id
+        ).all()
+
+        # All sessions should still be unrevoked.
+        for s in user_sessions:
+            assert s.revoked_at is None
+
+
+    def test_logout_all_revokes_all_sessions_for_user(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # This time, we set a refresh cookie so the endpoint can identify 
+        # the user and revoke all their sessions.
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["message"] == "Logged out of all devices."
+
+        # All sessions for this user should now be revoked.
+        user_sessions = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == test_user.id
+        ).all()
+
+        assert len(user_sessions) > 0
+        for s in user_sessions:
+            assert s.revoked_at is not None
+
+
+# ---------------------------------------------------------
+# ACTIVE SESSIONS
+# ---------------------------------------------------------
+
+class TestAuthActiveSessions:
+    def test_active_sessions_returns_all_sessions_sorted(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # The user already has one session from the fixture. Create a second one
+        # manually to make sure sorting works.
+        now = datetime.now(timezone.utc)
+        later = now + timedelta(minutes = 5)
+
+        second_session = SessionTokenModel(
+            user_id = test_user.id,
+            refresh_token_hash = "fake_refresh_token_hash",
+            refresh_token_id = uuid.uuid4(),
+            created_at = later,
+            expires_at = later + timedelta(days = 30),
+            user_agent = "pytest-agent",
+            ip_address = "127.0.0.1"
+        )
+        create_test_db.add(second_session)
+        create_test_db.commit()
+
+        # Authenticate the user by setting the access token cookie.
+        # get_current_user will read the access token from the cookie and
+        # use it to identify the user. The get_active_sessions endpoint
+        # uses get_current_user as a dependency. The flow:
+        #
+        #   1. get_active_sessions called
+        #   2. Dependencies are resolved (get_session and get_current_user, in this case).
+        #      This will give us a database connection and a user. The latter requires
+        #      that we have already set an access token (otherwise, it will return an 
+        #      exception). Doing this authenticates the user.
+        #   3. get_active_sessions executes.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        sessions = response.json()["sessions"]
+        assert len(sessions) == 2
+
+        # Sessions should be sorted by created_at descending.
+        assert sessions[0]["created_at"] >= sessions[1]["created_at"]
+
+
+    def test_active_sessions_fails_if_no_access_token(
+        self,
+        client
+    ):
+        response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# ---------------------------------------------------------
+# TERMINATE SESSION
+# ---------------------------------------------------------
+
+class TestAuthTerminateSession:
+
+    def test_terminate_session_successfully_revokes_session(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        # Get the test user's existing session (which we get from a fixture).
+        session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == test_user.id
+        ).first()
+
+        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["message"] == "Session terminated successfully."
+
+        # The session should now be revoked.
+        updated = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.id == session_token.id
+        ).first()
+
+        assert updated.revoked_at is not None
+
+
+    def test_terminate_session_already_revoked(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        # Revoke the session manually.
+        session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == test_user.id
+        ).first()
+        session_token.revoked_at = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["message"] == "Session already terminated."
+
+
+    def test_terminate_session_not_found(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user
+    ):
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        # Use a random UUID that does not exist in the database.
+        random_id = uuid.uuid4()
+
+        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{random_id}")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.json()["detail"] == "Session not found."
+
+
+# ---------------------------------------------------------
 # REFRESH
 # ---------------------------------------------------------
 
@@ -763,7 +989,9 @@ class TestAuthRefresh:
 
         # The endpoint should revoke all sessions for our test user.
         assert second_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert second_response.json()["detail"] == "Refresh token reuse detected. All sessions revoked."
+        assert second_response.json()["detail"] == (
+            "Refresh token reuse detected. All sessions revoked."
+        )
 
         user_sessions = create_test_db.query(SessionTokenModel).filter(
             SessionTokenModel.user_id == test_user.id

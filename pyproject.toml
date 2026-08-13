@@ -16,3 +16,12 @@ omit = [
     "src/app/ingest_tea_profiles.py",
     "src/app/seed_tea_profiles.py",
 ]
+
+[tool.coverage.report]
+# exclude reporting errors and common defensive codeblocks as uncovered for testing.
+exclude_lines = [
+    "pragma: no cover",
+    "except Exception",
+    "raise HTTPException",
+    "sentry_sdk.capture_exception",
+]

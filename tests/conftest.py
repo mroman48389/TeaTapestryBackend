@@ -17,15 +17,9 @@ from sqlalchemy.orm import sessionmaker
 import uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
-from src.core.config import settings
 # import tracemalloc
 
 import logging
-
-# Remove the verbose SQL statements we don't care about from the TERMINAL 
-# output.
-logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
-logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
 from src.app.main import app
 from src.db.base import Base
@@ -45,6 +39,11 @@ from src.utils.auth.jwt_utils import (
 from tests.utils.test_utils import get_empty_user_tea_profile_notes_body
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 from src.constants.jwt_constants import REFRESH_TOKEN_LIFETIME_DAYS
+
+# Remove the verbose SQL statements we don't care about from the TERMINAL 
+# output.
+logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
 # Report leaks (slow)
 # tracemalloc.start()

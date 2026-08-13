@@ -12,7 +12,6 @@ from src.constants.jwt_constants import (
 )
 from src.api.schemas.auth.refresh_token_schema import RefreshTokenPayloadSchema
 from src.api.schemas.auth.access_token_schema import AccessTokenPayloadSchema
-from src.utils.log_utils import safe_debug
 
 def create_access_token(user_id: str, email_verified: bool) -> str:
     """

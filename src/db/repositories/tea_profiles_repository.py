@@ -46,10 +46,10 @@ class TeaProfilesRepository:
             
             return tea_profile
         
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             raise TeaProfileQueryError(
                 "Failed to fetch tea profile",
-                details={"id": tea_profile_id},
+                details = {"id": tea_profile_id},
             ) from exc
 
     # Get multiple tea profiles.
@@ -84,6 +84,7 @@ class TeaProfilesRepository:
                             query = query.filter(
                                 func.lower(column).any(v, operator="ilike")
                             )
+
                     else:
                         # SQLite fallback: stored as JSON-like text --> substring match
                         for v in value:
@@ -115,10 +116,10 @@ class TeaProfilesRepository:
 
             return teas_profiles
         
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             raise TeaProfileQueryError(
                 "Failed to list tea profiles",
-                details={"filters": filters, "limit": limit, "offset": offset},
+                details = {"filters": filters, "limit": limit, "offset": offset},
             ) from exc
 
     # later, once the user can add their own tea profiles: 

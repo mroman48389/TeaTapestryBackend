@@ -714,6 +714,9 @@ def logout_all(
 
         # If we didn't find a session token, assume there's no active session on this
         # device and do as we did above.
+        #
+        # This scenario can happen if the user logs out on a different device, the 
+        # session expired, or the cookie is stale.
         if not session_token:
             delete_auth_token_cookies(request, response)
 

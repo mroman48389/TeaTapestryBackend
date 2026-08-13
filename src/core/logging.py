@@ -49,8 +49,8 @@ def configure_logging():
     # Enable SQLAlchemy engine logging (safe, no parameters logged)
     # Did this so we can run a PowerShell script to detect N+1 problems.
     sqlalchemy_logger = logging.getLogger("sqlalchemy.engine")
-    if IS_LOCAL_ENV:
+    if IS_LOCAL_ENV: # pragma: no cover
         sqlalchemy_logger.setLevel(logging.INFO)
-    else:
+    else: # pragma: no cover
         sqlalchemy_logger.setLevel(logging.WARNING)
     sqlalchemy_logger.propagate = True

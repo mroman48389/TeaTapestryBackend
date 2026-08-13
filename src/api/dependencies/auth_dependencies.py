@@ -1,4 +1,3 @@
-import uuid
 from starlette import status
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session

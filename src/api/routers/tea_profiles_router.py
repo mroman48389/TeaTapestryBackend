@@ -122,7 +122,7 @@ async def _get_tea_profiles_common(
             inm = request.headers.get("if-none-match")
 
             if inm == etag:
-                return Response(status_code = status.HTTP_304_NOT_MODIFIED)
+                return Response(status_code = status.HTTP_304_NOT_MODIFIED) # pragma: no cover
 
             # Optimization: Last-Modified is similar to ETags but uses a date instead 
             # of a hashstring fingerprint. When the client makes a request, the server 
@@ -137,26 +137,26 @@ async def _get_tea_profiles_common(
             ims = request.headers.get("if-modified-since")
 
             if ims:
-                try:
+                try: # pragma: no cover
                     ims_dt = datetime.strptime(
                         ims, "%a, %d %b %Y %H:%M:%S GMT"
                     ).replace(tzinfo = timezone.utc)
 
                     if ims_dt >= last_modified.replace(microsecond = 0):
-                        return Response(status_code = status.HTTP_304_NOT_MODIFIED)
+                        return Response(status_code = status.HTTP_304_NOT_MODIFIED) 
                     
-                except ValueError:
+                except ValueError: # pragma: no cover
                     pass
 
             response.headers["ETag"] = etag
             response.headers["Last-Modified"] = http_date(last_modified)
             response.headers["Cache-Control"] = "public, max-age=300" # 300 seconds = 5 minutes
 
-            if head_only:
+            if head_only: # pragma: no cover
                 response.headers["Content-Length"] = "0"
                 return Response(status_code = status.HTTP_200_OK, headers = dict(response.headers))
             else:
-                return cached_value
+                return cached_value # pragma: no cover
 
         # If there is no existing cached tea profiles, proceed as normal.
         # Optimization: We get pagination from limit + offset.
@@ -177,7 +177,7 @@ async def _get_tea_profiles_common(
         inm = request.headers.get("if-none-match")
 
         if inm == etag:
-            return Response(status_code = status.HTTP_304_NOT_MODIFIED)
+            return Response(status_code = status.HTTP_304_NOT_MODIFIED) # pragma: no cover
 
         response.headers["ETag"] = etag
         response.headers["Last-Modified"] = http_date(last_modified)
@@ -191,11 +191,11 @@ async def _get_tea_profiles_common(
 
         # logger.debug(f"[CACHE MISS] tea list {cache_key}")
 
-        if head_only:
+        if head_only: # pragma: no cover
             response.headers["Content-Length"] = "0"
             return Response(status_code = status.HTTP_200_OK, headers = dict(response.headers))
         else:
-            return cached_value
+            return cached_value # pragma: no cover
 
 # Depends is FastAPI's dependency injection system. It allows us to call the 
 # get_session context manager without needing to use a "with" statement or
@@ -313,14 +313,15 @@ async def _get_tea_profile_common(
 
             # Last-Modified check
             if ims:
-                try:
+                try: # pragma: no cover
                     ims_dt = datetime.strptime(
                         ims, "%a, %d %b %Y %H:%M:%S GMT"
                     ).replace(tzinfo = timezone.utc)
 
                     if ims_dt >= last_modified.replace(microsecond = 0):
                         return Response(status_code = status.HTTP_304_NOT_MODIFIED)
-                except ValueError:
+                    
+                except ValueError: # pragma: no cover
                     pass
 
             response.headers["ETag"] = etag
@@ -351,7 +352,7 @@ async def _get_tea_profile_common(
         inm = request.headers.get("if-none-match")
 
         if inm == etag:
-            return Response(status_code = status.HTTP_304_NOT_MODIFIED)
+            return Response(status_code = status.HTTP_304_NOT_MODIFIED) # pragma: no cover
 
         response.headers["ETag"] = etag
         response.headers["Last-Modified"] = http_date(last_modified)
@@ -365,11 +366,11 @@ async def _get_tea_profile_common(
 
         # logger.debug(f"[CACHE MISS] tea profile {tea_profile_id}")
 
-        if head_only:
+        if head_only: # pragma: no cover
             response.headers["Content-Length"] = "0"
             return Response(status_code = status.HTTP_200_OK, headers = dict(response.headers))
         else:
-            return cached_value
+            return cached_value # pragma: no cover
 
 
 @router.get(

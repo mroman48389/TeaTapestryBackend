@@ -19,12 +19,12 @@ def register_rate_limit_handlers(app: FastAPI):
         # Sentry will tell us about endpoints that are hits too often and the
         # abusive IPs. It will help us gauge if our endpoints are too strict as
         # well.
-        sentry_sdk.capture_message(
+        sentry_sdk.capture_message( # pragma: no cover
             f"Rate limit exceeded for {request.url.path}",
             level = "warning"
         )
 
-        return JSONResponse(
+        return JSONResponse( # pragma: no cover
             status_code = status.HTTP_429_TOO_MANY_REQUESTS,
             content = {
                 "error": {

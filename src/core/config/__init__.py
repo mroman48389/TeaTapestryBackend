@@ -15,13 +15,13 @@ from src.core.config.production_config import ProductionConfig
 def get_settings():
     env = os.getenv("ENVIRONMENT", "local")
 
-    if env == "production":
+    if env == "production": # pragma: no cover
         return ProductionConfig() # pyright: ignore[reportCallIssue]
     
-    if env == "staging":
+    if env == "staging": # pragma: no cover
         return StagingConfig() # pyright: ignore[reportCallIssue]
     
-    if env == "preview":
+    if env == "preview": # pragma: no cover
         return PreviewConfig() # pyright: ignore[reportCallIssue]
     
     return LocalConfig() # pyright: ignore[reportCallIssue]

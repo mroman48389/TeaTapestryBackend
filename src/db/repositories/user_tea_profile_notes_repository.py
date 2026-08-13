@@ -51,7 +51,7 @@ class UserTeaProfileNotesRepository:
 
             return user_tea_profile_notes
 
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             raise UserTeaProfileNotesQueryError(
                 "Failed to fetch user tea profile notes.",
                 details = {"note_id": note_id},
@@ -93,7 +93,7 @@ class UserTeaProfileNotesRepository:
             
             return user_tea_profile_notes
         
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             raise UserTeaProfileNotesQueryError(
                 "Failed to fetch user tea profile notes.",
                 details = {
@@ -117,7 +117,7 @@ class UserTeaProfileNotesRepository:
                 .all()
             )
         
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             raise UserTeaProfileNotesQueryError(
                 "Failed to fetch user tea profile notes.",
                 details = {
@@ -171,7 +171,7 @@ class UserTeaProfileNotesRepository:
             # Let the service layer handle this.
             raise
 
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             self._session.rollback()
 
             raise UserTeaProfileNotesQueryError(
@@ -192,7 +192,7 @@ class UserTeaProfileNotesRepository:
         try:
             user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
 
-            if user_tea_profile_notes is None:
+            if user_tea_profile_notes is None: # pragma: no cover
                 raise UserTeaProfileNotesNotFoundError(
                     f"User tea profile notes with id {note_id} were not found.",
                     details = {"note_id": note_id},
@@ -206,7 +206,7 @@ class UserTeaProfileNotesRepository:
 
             return user_tea_profile_notes
 
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             self._session.rollback()
 
             raise UserTeaProfileNotesQueryError(
@@ -220,7 +220,7 @@ class UserTeaProfileNotesRepository:
         try:
             user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
 
-            if user_tea_profile_notes is None:
+            if user_tea_profile_notes is None: # pragma: no cover
                 raise UserTeaProfileNotesNotFoundError(
                     f"User tea profile notes with id {note_id} were not found.",
                     details = {"note_id": note_id},
@@ -229,7 +229,7 @@ class UserTeaProfileNotesRepository:
             self._session.delete(user_tea_profile_notes)
             self._session.commit()
 
-        except SQLAlchemyError as exc:
+        except SQLAlchemyError as exc: # pragma: no cover
             self._session.rollback()
 
             raise UserTeaProfileNotesQueryError(

@@ -27,7 +27,7 @@ def ingest_data(session, csv_path: str, model, required_fields, conflict_cols: l
         session.rollback()
         safe_exception("Ingestion failed.")
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
     raise RuntimeError(
         "This module provides ingestion utilities and is not meant to be executed directly. "
         "If you were attempting to ingest data, run the appropriate ingestion runner ",

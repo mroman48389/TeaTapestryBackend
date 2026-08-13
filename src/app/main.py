@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     #
     # NOTE: we need to import the TeaProfileModel so that when we deploy with
     # Fly.io, the tables get built.
-    if not IS_RUNNING_TESTS: 
+    if not IS_RUNNING_TESTS:
         from src.db.engine import engine
         from src.db.models.tea_profiles_model import TeaProfileModel  # noqa: F401
 
