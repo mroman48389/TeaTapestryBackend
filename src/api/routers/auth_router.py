@@ -52,9 +52,7 @@ from src.constants.jwt_constants import (
     REFRESH_TOKEN_LIFETIME_DAYS
 )
 from src.utils.auth.jwt_utils import (
-    create_access_token,
-    create_refresh_token, 
-    decode_refresh_token
+    create_access_token
 )
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import (
@@ -64,7 +62,7 @@ from src.core.rate_limit.config_rate_limit import (
 from src.constants.route_constants import (
     AUTH,
     AUTH_PREFIX,
-    SIGN_UP,
+    SIGNUP,
     VERIFY_EMAIL,
     SEND_VERIFICATION,
     REQUEST_PASSWORD_RESET,
@@ -96,9 +94,20 @@ from src.utils.auth.cookie_utils import delete_auth_token_cookies
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
 
+# Postman test steps for testing signup:
+#
+#     1. Call signup endpoint as "POST /auth/signup" with body:
+#
+#            {
+#                "email": "someUsername@gmail.com",
+#                "password": "SomePassword@123",
+#                "display_name": "Some User"
+#            }
+#
 # request param is required by SlowAPI. Without it, we'll get an exception.
+#
 @router.post(
-    f"/{SIGN_UP}", 
+    f"/{SIGNUP}", 
     response_model = UserOutboundSchema, 
     status_code = status.HTTP_201_CREATED
 )
@@ -176,27 +185,12 @@ def signup(
         return new_user
 
 
-# Postman test steps for testing send_verification and verify_email:
+# Postman steps for testing send_verification and verify_email:
 #
-#     1. Create the user. Call signup endpoint as POST /auth/signup with body
+#     1. Follow the steps for testing login. Copy the access token from the response. 
+#         You will need it for the send_verification endpoint.
 #
-#         {
-#             "email": "someUsername@gmail.com",
-#             "password": "SomePassword@123",
-#             "display_name": "Some User"
-#         }
-#
-#     2. Authenticate the user. Call login endpoint as POST /auth/login with body
-#
-#         {
-#             "email": "someUsername@gmail.com",
-#             "password": "SomePassword@123"
-#         }
-#
-#         Copy the access token from the response. You will need it for the
-#         send_verification endpoint.
-#
-#     3. Send a verification email. Call send_verification as POST /auth/send_verification
+#     2. Send a verification email. Call send_verification as "POST /auth/send_verification"
 #        with the Authorization header:
 #
 #            Authorization: Bearer <access_token>
@@ -204,13 +198,13 @@ def signup(
 #        This endpoint will log the raw email_verification token (only in development
 #        mode). You'll need that for verify_email, so grab it.
 #
-#     4. Verify the email. Call verify_email as POST /auth/verify_email?token=[raw_token]
+#     3. Verify the email. Call verify_email as "POST /auth/verify_email?token=[raw_token]"
 #
 #        If the token is valid, the endpoint should return a success message and mark
 #        the user's email as verified. See note in verify_email for why we put the token in 
 #        the URL.
 #
-#     5. (Optional) Try calling verify_email again with the same token. It should now fail
+#     4. (Optional) Try calling verify_email again with the same token. It should now fail
 #        because the token has already been used.
 
 @router.post(
@@ -332,25 +326,19 @@ def verify_email(
 
 # Postman test steps for testing request_password_reset and reset_password:
 #
-#     1. Create the user. Call signup endpoint as POST /auth/signup with body
+#     1. Follow the steps for testing the signup endpoint.
 #
-#         {
-#             "email": "someUsername@gmail.com",
-#             "password": "SomePassword@123",
-#             "display_name": "Some User"
-#         }
-#
-#     2. Send a reset email. Call request_password_reset as POST /auth/request_password_reset 
+#     2. Send a reset email. Call request_password_reset as "POST /auth/request_password_reset"
 #        with body
 #
-#        {
-#            "email": "someUsername@gmail.com"
-#        }
+#            {
+#                "email": "someUsername@gmail.com"
+#            }
 #
 #        This endpoint will log the raw token (only in development mode). You'll
 #        need that for reset_password, so grab it.
 #
-#     3. Reset the password. Call reset_password as POST /auth/reset_password
+#     3. Reset the password. Call reset_password as "POST /auth/reset_password"
 #        with body
 #
 #        {
@@ -522,6 +510,27 @@ def reset_password(
         return PasswordResetSubmissionResponseSchema(message = "Password reset successfully.")
 
 
+# Postman test steps for testing login:
+#
+#     1. Follow the steps for testing signup, if a user does not exist yet.
+#
+#     2. Call login as "POST /auth/login" with body
+#
+#            {
+#                "email": "someUsername@gmail.com"
+#                "password": "SomePassword@123"
+#            }
+#
+#        Use the same email and password as you did during signup. Upon successful Postman will 
+#        automatically store the access_token and refresh_token cookies. These are required 
+#        for all protected endpoints, including:
+#            
+#            /auth/me
+#            /auth/refresh 
+#            /auth/active_sessions 
+#            /auth/terminate_session/{session_id}
+#            /auth/logout_all
+#
 @router.post(
     f"/{LOGIN}", 
     status_code = status.HTTP_200_OK,
@@ -624,6 +633,13 @@ def login(
         return response
 
 
+# Postman test steps for testing logout or logout_all:
+#
+#     1. Follow the steps for testing login. 
+#
+#     2. Call logout or logout_all as "POST /auth/logout_all". 
+#        (no body needed for either)
+#
 @router.post(
     f"/{LOGOUT}",
     status_code = status.HTTP_200_OK,
@@ -759,7 +775,13 @@ def logout_all(
 
         return LogoutAllResponseSchema(message = "Logged out of all devices.")
     
-
+# Postman test steps for testing active_sessions:
+#
+#     1. Follow the steps for testing login. 
+#
+#     2. Call active_sessions as "GET /auth/active_sessions". 
+#        (no body needed)
+#
 @router.get(
     f"/{ACTIVE_SESSIONS}", 
     status_code = status.HTTP_200_OK,
@@ -798,12 +820,19 @@ def get_active_sessions(
 
         return ActiveSessionsResponseSchema(sessions = sessions_list)
 
-
+# Postman test steps for testing active_sessions:
+#
+#     1. Follow steps for active_sessions. Copy one of the session_id values you
+#        get in the response. 
+#
+#     2. Call terminate_sessions as POST /auth/terminate_session/[session_id]. (no body needed)
+#
 # Note that we inject UserInternalModel in endpoints that require authentication to have
 # happened first. It forces authentication.
 #
 # The session_id must be a param in terminate_session as well because we are using it as 
 # a path parameter in the URL.
+#
 @router.post(
     f"/{TERMINATE_SESSION}/{{session_id}}", 
     status_code = status.HTTP_200_OK,
@@ -847,6 +876,12 @@ def terminate_session(
         return TerminateSessionResponseSchema(message = "Session terminated successfully.")
 
 
+# Postman test steps for testing refresh:
+#
+#     1. Follow steps for testing login. 
+#
+#     2. Call refresh as "POST /auth/refresh" (no body needed)
+#
 @router.post(
     f"/{REFRESH}", 
     status_code = status.HTTP_200_OK,
@@ -884,22 +919,12 @@ def refresh_token(
                 detail = "Missing refresh token."
             )
 
-        # Extract the refresh_token_id and user_id from the raw refresh token.
-        try:
-            payload = decode_refresh_token(raw_refresh_token)
-            incoming_refresh_token_id = payload.refresh_token_id
-            incoming_user_id = payload.sub
+        # Hash the opaque refresh token and look up the corresponding session and 
+        # refresh token id.
+        hashed_refresh_token = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
 
-        except Exception:
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid refresh token format."
-            )
-
-        # Look up the current active session for this user.
         session_token = session.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == incoming_user_id,
-            SessionTokenModel.revoked_at.is_(None)
+            SessionTokenModel.refresh_token_hash == hashed_refresh_token,
         ).first()
 
         if not session_token:
@@ -915,17 +940,27 @@ def refresh_token(
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo = timezone.utc)
 
-        # Make sure the refresh token isn't expired or revoked.
+        # Detect refresh token reuse: if the session is already revoked, the token was reused.
+        # Token reuse just means that the refresh token is not the same one the 
+        # session had before.
+        if session_token.revoked_at is not None:
+            user_session_tokens = session.query(SessionTokenModel).filter(
+                SessionTokenModel.user_id == session_token.user_id,
+            )
+
+            user_session_tokens.update({SessionTokenModel.revoked_at: now})
+            session.commit()
+
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Refresh token reuse detected. All sessions revoked."
+            )
+
+        # Make sure the refresh token isn't expired.
         if expires_at < now:
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "Refresh token expired."
-            )
-
-        if session_token.revoked_at is not None:
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Refresh token revoked."
             )
 
         # Now that we know the session token is good, we can get the user.
@@ -939,37 +974,11 @@ def refresh_token(
                 detail = "User no longer exists."
             )
 
-        # The user should exist. Rotate the refresh token.
-
-        # Detect token reuse. Compare the incoming refresh token ID to the stored one.
-        # Token reuse means that the refresh token is not the same one the session had
-        # before.
-        if incoming_refresh_token_id != session_token.refresh_token_id:
-            # The refresh token was stolen or reused if we make it here!
-            # Revoke ALL sessions for this user.
-            user_session_tokens = session.query(SessionTokenModel).filter(
-                SessionTokenModel.user_id == user.id,
-                SessionTokenModel.revoked_at.is_(None)
-            )
-
-            user_session_tokens.update({SessionTokenModel.revoked_at: now})
-
-            session.commit()
-
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Refresh token reuse detected. All sessions revoked."
-            )
-
-        # Rotate the refresh token.
+        # Rotate the refresh token. Generate a new refresh token id,
+        # raw refresh token, and hashed refresh token.
         new_refresh_token_id = uuid.uuid4()
 
-        new_raw_refresh_token = create_refresh_token(
-            user_id = str(user.id),
-            email_verified = user.is_verified,
-            refresh_token_id = str(new_refresh_token_id)
-        )
-
+        new_raw_refresh_token = secrets.token_urlsafe(32)
         new_hashed_refresh_token = hashlib.sha256(
             new_raw_refresh_token.encode()
         ).hexdigest()
@@ -1039,8 +1048,15 @@ def refresh_token(
         )
 
         return response
+    
 
-
+# Postman test steps for testing refresh:
+#
+#     1. Follow steps for testing login. 
+#
+#     2. Call me as "GET /auth/me"
+#        (no body needed)
+#
 @router.get(
     f"/{ME}",
     status_code = status.HTTP_200_OK,
