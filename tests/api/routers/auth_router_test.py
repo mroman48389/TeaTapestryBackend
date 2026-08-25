@@ -2,6 +2,8 @@ from starlette import status
 from datetime import datetime, timezone, timedelta
 import uuid
 import hashlib
+import gzip
+import json
 
 from src.db.models.auth.user_models import UserInternalModel
 from src.db.models.auth.session_token_model import SessionTokenModel
@@ -18,7 +20,8 @@ from src.constants.route_constants import (
     AUTH_ACTIVE_SESSIONS_PREFIX,
     AUTH_TERMINATE_SESSION_PREFIX,
     AUTH_REFRESH_PREFIX,
-    AUTH_ME_PREFIX
+    AUTH_ME_PREFIX,
+    AUTH_EXPORT_USER_DATA_PREFIX,
 )
 from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.constants.token_constants import (
@@ -777,6 +780,7 @@ class TestAuthLogoutAll:
 # ---------------------------------------------------------
 
 class TestAuthActiveSessions:
+
     def test_active_sessions_returns_all_sessions_sorted(
         self,
         client,
@@ -1022,3 +1026,93 @@ class TestAuthMe:
         assert data["id"] == str(test_user.id)
         assert data["email"] == test_user.email
         assert data["created_at"] != ""
+
+# ---------------------------------------------------------
+# EXPORT USER DATA
+# ---------------------------------------------------------
+
+class TestAuthExportUserData:
+
+    def test_export_user_data_success(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # Simulate a fresh login by setting last_login to now. Recall that the
+        # endpoint requires the user to have logged in within the last 5 minutes.
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        # The response body should be gzip-compressed bytes.
+        decompressed = gzip.decompress(response.content)
+        data = json.loads(decompressed)
+
+        # Verify that one of the expected fields is in the file. The user id should be
+        # that of our test user.
+        assert isinstance(data, dict)
+        assert "user" in data  
+        assert data["user"]["id"] == str(test_user.id)
+
+
+    def test_export_user_data_fails_if_no_access_token(
+        self,
+        client
+    ):
+        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+    def test_export_user_data_requires_fresh_login(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # Set last_login far in the past.
+        test_user.last_login = datetime.now(timezone.utc) - timedelta(days = 30)
+        create_test_db.commit()
+
+        # Authenticate user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert "log in again" in response.json()["detail"]
+
+
+    def test_export_user_data_returns_valid_gzip(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        # Validate gzip header (first two bytes should be 0x1f, 0x8b)
+        compressed = response.content
+        assert compressed[:2] == b"\x1f\x8b"
+
+        # We should be able to load the decompressed file without an error.
+        decompressed = gzip.decompress(compressed)
+        json.loads(decompressed)

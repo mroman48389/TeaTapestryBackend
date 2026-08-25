@@ -6,7 +6,9 @@ import uuid
 import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import json
+import gzip
 
 from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.session_utils import get_session
@@ -57,7 +59,8 @@ from src.utils.auth.jwt_utils import (
 from src.core.rate_limit.setup_rate_limit import rate_limiter
 from src.core.rate_limit.config_rate_limit import (
     LOW_RATE_LIMIT,
-    VERY_LOW_RATE_LIMIT
+    VERY_LOW_RATE_LIMIT,
+    LOWEST_RATE_LIMIT
 )
 from src.constants.route_constants import (
     AUTH,
@@ -73,7 +76,8 @@ from src.constants.route_constants import (
     ACTIVE_SESSIONS,
     TERMINATE_SESSION,
     REFRESH,
-    ME
+    ME,
+    EXPORT_USER_DATA
 )
 from src.utils.auth.token_utils import (
     create_raw_verification_token,
@@ -90,9 +94,48 @@ from src.utils.request_metadata_utils import (
     get_user_agent
 )
 from src.utils.auth.cookie_utils import delete_auth_token_cookies
+from src.app.services.user_data_export_services import UserDataExportService
+from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
 
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
+
+FRESH_LOGIN_WINDOW_SECONDS = 5 * 60
+
+###############################################################################
+#################################   Helpers   #################################
+###############################################################################
+
+# Requiring a recent login (within the past 5 minutes) protects against
+# stolen long-lived session tokens, compromised devices, unattended browsers,
+# and malicious scripts.
+def _require_fresh_login(current_user: UserInternalModel):
+    if current_user.last_login is None:
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Please log in again before exporting your data."
+        )
+
+    last_login = current_user.last_login
+
+    # Normalize naive datetimes (SQLite strips timezone info in testing).
+    if last_login.tzinfo is None:
+        last_login = last_login.replace(tzinfo = timezone.utc)
+
+    now = datetime.now(timezone.utc)
+
+    if (now - last_login) > timedelta(seconds = FRESH_LOGIN_WINDOW_SECONDS):
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = (
+                "Your login session is too old. "
+                "Please log in again before exporting your data."
+            )
+        )
+
+###############################################################################
+###############################   Endpoints   #################################
+###############################################################################
 
 # Postman test steps for testing signup:
 #
@@ -560,6 +603,9 @@ def login(
                 status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "Invalid email or password."
             )
+
+        user.last_login = datetime.now(timezone.utc)
+        session.commit()
 
         # Generate tokens.
         access_token = create_access_token(str(user.id), user.is_verified)
@@ -1080,3 +1126,82 @@ def get_me(
             email = current_user.email,
             created_at = current_user.created_at
         )
+
+
+# Postman test steps for testing export user data:
+#
+#     1. Follow the steps for testing login. 
+#
+#     2. Call export_user_data as "GET /auth/export_user_data". 
+#        (no body needed). To actually be able to see the file, you
+#        can run this in PowerShell:
+#  
+# $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+#
+# $session.Cookies.Add(
+#     (New-Object System.Net.Cookie("access_token", "YOUR_ACCESS_TOKEN", "/", "localhost"))
+# )
+#
+# $session.Cookies.Add(
+#     (New-Object System.Net.Cookie("refresh_token", "YOUR_REFRESH_TOKEN", "/", "localhost"))
+# )
+#
+# Invoke-WebRequest `
+#   -Uri "http://localhost:8000/auth/export_user_data" `
+#   -WebSession $session `
+#   -OutFile "Tea_Tapestry_user_data.json.gz"
+#
+#       This will save the file to whatever directory you run the command from. Just unzip
+#       the file to look at its contents.
+#
+@router.get(
+    f"/{EXPORT_USER_DATA}",
+    status_code = status.HTTP_200_OK,
+    summary = "Export all user data",
+    description = (
+        "Returns all data associated with the user, including profile, "
+        "sessions, verification tokens, and tea profile notes."
+    )
+)
+@rate_limiter.limit(LOWEST_RATE_LIMIT)
+def export_user_data(
+    request: Request,
+    current_user: UserInternalModel = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    with sentry_sdk.start_span(op = AUTH, name = "export_user_data"):
+        sentry_sdk.set_tag("endpoint", "export_user_data")
+
+        _require_fresh_login(current_user)
+
+        # Instantiate repos.
+        user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
+
+        # Instantiate service.
+        user_data_export_service = UserDataExportService(
+            session = session,
+            user_tea_profile_notes_repo = user_tea_profile_notes_repo,
+        )
+
+        try:
+            user_data = user_data_export_service.export_user_data(current_user.id)
+            user_data_JSON_bytes = json.dumps(user_data, indent = 4).encode("utf-8")
+            user_data_compressed = gzip.compress(user_data_JSON_bytes)
+
+            # Ex: Tea_Tapestry_user_data 24-Aug-2026 at 16-24-00.json
+            timestamp = datetime.now().strftime("%d-%b-%Y at %H-%M-%S")
+            file_name = f"Tea_Tapestry_user_data {timestamp}.json.gz"
+
+            return StreamingResponse(
+                iter([user_data_compressed]),
+                media_type = "application/json; charset=utf-8",
+                headers = {
+                    "Content-Disposition": f'attachment; filename="{file_name}"'
+                },
+            )
+        
+        except Exception:
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "Failed to export user data.",
+            )

@@ -35,6 +35,7 @@ class UserTeaProfileNotesService:
             user_tea_profile_notes = self._repo.get_by_user_and_tea_profile_id(
                 user_id, tea_profile_id
             )
+
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
         except UserTeaProfileNotesNotFoundError: # pragma: no cover
@@ -53,6 +54,7 @@ class UserTeaProfileNotesService:
 
         try:
             user_tea_profile_notes = self._repo.get_by_user_id(user_id)
+
             return [
                 UserTeaProfileNotesOutboundSchema.model_validate(entry)
                 for entry in user_tea_profile_notes
@@ -73,6 +75,7 @@ class UserTeaProfileNotesService:
 
         try:
             user_tea_profile_notes = self._repo.create(user_id, tea_profile_id, inbound_schema)
+
             return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
 
         except UserTeaProfileNotesAlreadyExistError: # pragma: no cover
@@ -105,6 +108,7 @@ class UserTeaProfileNotesService:
                 )
 
             updated_user_tea_profile_notes = self._repo.update(note_id, inbound_schema)
+            
             return UserTeaProfileNotesOutboundSchema.model_validate(updated_user_tea_profile_notes)
 
         except UserTeaProfileNotesNotFoundError: # pragma: no cover

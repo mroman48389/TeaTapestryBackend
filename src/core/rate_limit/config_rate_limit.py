@@ -40,3 +40,10 @@ def VERY_LOW_RATE_LIMIT() :
     
     else:  # pragma: no cover
         return "5/minute"
+
+def LOWEST_RATE_LIMIT():
+    if IS_RUNNING_TESTS: # pragma: no cover
+        return "10000/minute"
+    
+    else:  # pragma: no cover
+        return "1/minute"

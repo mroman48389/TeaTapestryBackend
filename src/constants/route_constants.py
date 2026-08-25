@@ -35,6 +35,7 @@ ACTIVE_SESSIONS = "active_sessions"
 TERMINATE_SESSION = "terminate_session"
 REFRESH = "refresh"
 ME = "me"
+EXPORT_USER_DATA = "export_user_data"
 
 AUTH_PREFIX = f"/{AUTH}"
 
@@ -50,6 +51,7 @@ AUTH_ACTIVE_SESSIONS_PREFIX = f"{AUTH_PREFIX}/{ACTIVE_SESSIONS}"
 AUTH_TERMINATE_SESSION_PREFIX = f"{AUTH_PREFIX}/{TERMINATE_SESSION}"
 AUTH_REFRESH_PREFIX = f"{AUTH_PREFIX}/{REFRESH}"
 AUTH_ME_PREFIX = f"{AUTH_PREFIX}/{ME}"
+AUTH_EXPORT_USER_DATA_PREFIX = f"{AUTH_PREFIX}/{EXPORT_USER_DATA}"
 
 
 # ---------------------------------------------------------
