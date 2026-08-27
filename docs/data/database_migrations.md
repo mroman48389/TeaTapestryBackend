@@ -17,9 +17,11 @@
 >
 >    3. Generate an Alembic migration. Suppose we are dropping a price column. Then we might do:
 >	
->	        alembic revision -m "Drop avg_price_per_oz_usd column from tea_profiles"
+>	        alembic revision --autogenerate -m "Drop avg_price_per_oz_usd column from tea_profiles"
 >	
->       This creates a new migration file under alembic/versions/[revision_id]_[file_name].py.
+>       This creates a new migration file under alembic/versions/[revision_id]_[file_name].py. Note that
+>       if you don't include autogenerate, the migration file will be empty and alembic will not inspect
+>       the models to compare metadata and generate columns.
 >
 >    4. Edit the migration file, if needed. It's critical to check and make sure it will do what you
 >       expect! For example, if you add a new column, you should see:

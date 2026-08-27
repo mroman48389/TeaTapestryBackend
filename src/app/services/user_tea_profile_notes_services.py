@@ -22,6 +22,7 @@ from src.app.errors import (
 )
 
 class UserTeaProfileNotesService:
+
     def __init__(self, repo: UserTeaProfileNotesRepository):
         self._repo = repo
 
@@ -139,7 +140,7 @@ class UserTeaProfileNotesService:
                     detail = "You do not have permission to delete this note.",
                 )
 
-            self._repo.delete(note_id)
+            self._repo.delete_by_note_id(note_id)
 
         except UserTeaProfileNotesNotFoundError: # pragma: no cover
             raise HTTPException( 

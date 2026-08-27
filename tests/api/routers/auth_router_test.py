@@ -22,8 +22,23 @@ from src.constants.route_constants import (
     AUTH_REFRESH_PREFIX,
     AUTH_ME_PREFIX,
     AUTH_EXPORT_USER_DATA_PREFIX,
+    AUTH_DELETE_USER_DATA_PREFIX,
+    AUTH_DELETE_USER_ACCOUNT_PREFIX,
+)
+from src.constants.dsar_constants import (
+    REQUEST_DELETE_USER_ACCOUNT,
+    REQUEST_DELETE_USER_DATA,
+    REQUEST_EXPORT_USER_DATA,
+    STATUS_FULFILLED,
+    STATUS_FAILED
 )
 from src.db.models.auth.verification_token_model import VerificationTokenModel
+from src.db.models.auth.dsar_log_model import DSARLogModel
+from src.app.services.user_data_export_services import UserDataExportService
+from src.app.services.user_data_deletion_services import (
+    UserDataDeletionService, 
+    UserAccountDeletionService
+)
 from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET,
@@ -32,7 +47,9 @@ from src.utils.auth.jwt_utils import (
     create_access_token,
     decode_access_token
 )
-from tests.utils.test_utils import fake_create_token_factory
+from tests.utils.test_utils import (
+    fake_create_token_factory
+)
 
 # ---------------------------------------------------------
 # SIGNUP
@@ -1027,6 +1044,7 @@ class TestAuthMe:
         assert data["email"] == test_user.email
         assert data["created_at"] != ""
 
+
 # ---------------------------------------------------------
 # EXPORT USER DATA
 # ---------------------------------------------------------
@@ -1062,14 +1080,64 @@ class TestAuthExportUserData:
         assert "user" in data  
         assert data["user"]["id"] == str(test_user.id)
 
+        # Verify that a DSAR log was created and fulfilled.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].request_type == REQUEST_EXPORT_USER_DATA
+        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].fulfilled_at is not None
+
 
     def test_export_user_data_fails_if_no_access_token(
         self,
-        client
+        client,
+        test_user,
+        create_test_db
     ):
         response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # No DSAR log should be created.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        assert dsar_logs == []
+
+
+    def test_export_user_data_marks_dsar_failed_on_exception(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        # ⭐ NEW — force service to throw
+        def export_user_data_exception(*args, **kwargs):
+            raise Exception("Failed to export user data.")
+
+        monkeypatch.setattr(
+            UserDataExportService,
+            "export_user_data",
+            export_user_data_exception
+        )
+
+        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        # Verify DSAR log marked FAILED.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].notes == "Failed to export user data."
+        assert dsar_logs[0].fulfilled_at is not None
 
 
     def test_export_user_data_requires_fresh_login(
@@ -1116,3 +1184,234 @@ class TestAuthExportUserData:
         # We should be able to load the decompressed file without an error.
         decompressed = gzip.decompress(compressed)
         json.loads(decompressed)
+
+
+# ---------------------------------------------------------
+# DELETE USER DATA
+# ---------------------------------------------------------
+
+class TestAuthDeleteUserData:
+
+    def test_delete_user_data_success(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        user_tea_profile_notes_repo,
+        empty_user_tea_profile_notes_inbound,
+    ):
+        # Simulate a fresh login.
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        # Create some user-generated data.
+        user_tea_profile_notes_repo.create(
+            user_id = test_user.id,
+            tea_profile_id = 99,
+            inbound_schema = empty_user_tea_profile_notes_inbound
+        )
+
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+
+        # Verify that user-generated data was deleted.
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(test_user.id)
+        assert user_tea_profile_notes == []
+
+        # Verify the user account still exists.
+        user = create_test_db.get(UserInternalModel, test_user.id)
+        assert user is not None
+
+        # Verify that a DSAR log was created and fulfilled.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].request_type == REQUEST_DELETE_USER_DATA
+        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].fulfilled_at is not None
+
+
+    def test_delete_user_data_fails_if_no_access_token(
+        self, 
+        client,
+        test_user,
+        create_test_db
+    ):
+        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # No DSAR log should be created.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        assert dsar_logs == []
+
+
+    def test_delete_user_data_marks_dsar_failed_on_exception(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        user_tea_profile_notes_repo,
+        empty_user_tea_profile_notes_inbound,
+        monkeypatch
+    ):
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        user_tea_profile_notes_repo.create(
+            user_id = test_user.id,
+            tea_profile_id = 99,
+            inbound_schema = empty_user_tea_profile_notes_inbound
+        )
+
+        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+
+        def delete_user_data_exception(*args, **kwargs):
+            raise Exception("Failed to delete user data.")
+
+        monkeypatch.setattr(
+            UserDataDeletionService,
+            "delete_user_data",
+            delete_user_data_exception
+        )
+
+        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        # Verify DSAR log marked FAILED.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].notes == "Failed to delete user data."
+        assert dsar_logs[0].fulfilled_at is not None
+
+        # Verify that user-generated data was not deleted.
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(test_user.id)
+        assert user_tea_profile_notes != []
+
+
+# ---------------------------------------------------------
+# DELETE USER ACCOUNT
+# ---------------------------------------------------------
+
+class TestAuthDeleteUserAccount:
+
+    def test_delete_user_account_success(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        user_tea_profile_notes_repo,
+        empty_user_tea_profile_notes_inbound,
+    ):
+        user_id = test_user.id
+
+        # Simulate a fresh login.
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        # Create some user-generated data.
+        user_tea_profile_notes_repo.create(
+            user_id = user_id,
+            tea_profile_id = 99,
+            inbound_schema = empty_user_tea_profile_notes_inbound
+        )
+
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(user_id), True))
+
+        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+
+        # Verify user-generated data was deleted.
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user_id)
+        assert user_tea_profile_notes == []
+
+        # Verify the user account was deleted.
+        user = create_test_db.get(UserInternalModel, user_id)
+        assert user is None
+
+        # Verify that a DSAR log was created and fulfilled.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].request_type == REQUEST_DELETE_USER_ACCOUNT
+        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].fulfilled_at is not None
+
+
+    def test_delete_user_account_fails_if_no_access_token(
+        self, 
+        client,
+        test_user,
+        create_test_db
+    ):
+        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+        # No DSAR log should be created.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        assert dsar_logs == []
+
+
+    def test_delete_user_account_marks_dsar_failed_on_exception(
+        self,
+        client,
+        test_user,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        user_tea_profile_notes_repo,
+        empty_user_tea_profile_notes_inbound,
+        monkeypatch
+    ):
+        user_id = test_user.id
+
+        test_user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+        user_tea_profile_notes_repo.create(
+            user_id = user_id,
+            tea_profile_id = 99,
+            inbound_schema = empty_user_tea_profile_notes_inbound
+        )
+
+        client.cookies.set("access_token", create_access_token(str(user_id), True))
+
+        def delete_user_account_exception(*args, **kwargs):
+            raise Exception("Failed to delete user account.")
+
+        monkeypatch.setattr(
+            UserAccountDeletionService,
+            "delete_user_account",
+            delete_user_account_exception
+        )
+
+        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        # Verify DSAR log marked FAILED.
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
+
+        assert len(dsar_logs) == 1
+        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].notes == "Failed to delete user account."
+        assert dsar_logs[0].fulfilled_at is not None
+
+        # Verify that the user account was not deleted.
+        user = create_test_db.get(UserInternalModel, user_id)
+        assert user is not None
+
+        # Verify that user-generated data was not deleted either.
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user_id)
+        assert user_tea_profile_notes != []

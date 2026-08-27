@@ -77,7 +77,14 @@ from src.constants.route_constants import (
     TERMINATE_SESSION,
     REFRESH,
     ME,
-    EXPORT_USER_DATA
+    EXPORT_USER_DATA,
+    DELETE_USER_DATA,
+    DELETE_USER_ACCOUNT,
+)
+from src.constants.dsar_constants import (
+    REQUEST_DELETE_USER_ACCOUNT,
+    REQUEST_DELETE_USER_DATA,
+    REQUEST_EXPORT_USER_DATA
 )
 from src.utils.auth.token_utils import (
     create_raw_verification_token,
@@ -95,7 +102,12 @@ from src.utils.request_metadata_utils import (
 )
 from src.utils.auth.cookie_utils import delete_auth_token_cookies
 from src.app.services.user_data_export_services import UserDataExportService
+from src.app.services.user_data_deletion_services import (
+    UserDataDeletionService,
+    UserAccountDeletionService
+)
 from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
+from src.db.repositories.dsar_log_repository import DSARLogRepository
 
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
@@ -1176,6 +1188,13 @@ def export_user_data(
 
         # Instantiate repos.
         user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
+        dsar_log_repo = DSARLogRepository(session)  
+
+        # Create DSAR log entry.
+        dsar_log = dsar_log_repo.create_log(              
+            user_id = current_user.id,
+            request_type = REQUEST_EXPORT_USER_DATA
+        )
 
         # Instantiate service.
         user_data_export_service = UserDataExportService(
@@ -1187,6 +1206,8 @@ def export_user_data(
             user_data = user_data_export_service.export_user_data(current_user.id)
             user_data_JSON_bytes = json.dumps(user_data, indent = 4).encode("utf-8")
             user_data_compressed = gzip.compress(user_data_JSON_bytes)
+
+            dsar_log_repo.mark_fulfilled(dsar_log.id) 
 
             # Ex: Tea_Tapestry_user_data 24-Aug-2026 at 16-24-00.json
             timestamp = datetime.now().strftime("%d-%b-%Y at %H-%M-%S")
@@ -1200,8 +1221,128 @@ def export_user_data(
                 },
             )
         
-        except Exception:
+        except Exception as e:
+            dsar_log_repo.mark_failed(dsar_log.id, notes = str(e))
+
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to export user data.",
+            )
+
+
+# Postman test steps for deleting user data:
+#
+#     1. Follow the steps for testing login. You may want to make a new user for this.
+#
+#     2. Call delete_user_data as "DELETE /auth/delete_user_data". 
+#
+@router.delete(
+    f"/{DELETE_USER_DATA}",
+    status_code = status.HTTP_204_NO_CONTENT,
+    summary = "Delete all user-generated data",
+    description = (
+        "Deletes all user-generated data associated with their account, including "
+        "tea profile notes, session tokens, and verification tokens. "
+        "The user account itself is preserved."
+    )
+)
+@rate_limiter.limit(LOWEST_RATE_LIMIT)
+def delete_user_data(
+    request: Request,
+    current_user: UserInternalModel = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    with sentry_sdk.start_span(op = AUTH, name = "delete_user_data"):
+        sentry_sdk.set_tag("endpoint", "delete_user_data")
+
+        _require_fresh_login(current_user)
+
+        # Instantiate repos.
+        user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
+        dsar_log_repo = DSARLogRepository(session)
+
+        # Create DSAR log entry.
+        dsar_log = dsar_log_repo.create_log(           
+            user_id = current_user.id,
+            request_type = REQUEST_DELETE_USER_DATA
+        )
+
+        # Instantiate service.
+        user_data_deletion_service = UserDataDeletionService(
+            session = session,
+            user_tea_profile_notes_repo = user_tea_profile_notes_repo,
+        )
+
+        try:
+            user_data_deletion_service.delete_user_data(current_user.id)
+
+            dsar_log_repo.mark_fulfilled(dsar_log.id)  
+
+            return Response(status_code = status.HTTP_204_NO_CONTENT)
+
+        except Exception as e:
+            dsar_log_repo.mark_failed(dsar_log.id, notes = str(e)) 
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "Failed to delete user data.",
+            )
+
+
+# Postman test steps for deleting user data:
+#
+#     1. Follow the steps for testing login. You may want to make a new user for this.
+#
+#     2. Call delete_user_account as "DELETE /auth/delete_user_account". 
+#
+@router.delete(
+    f"/{DELETE_USER_ACCOUNT}",
+    status_code = status.HTTP_204_NO_CONTENT,
+    summary = "Delete user account and all associated data",
+    description = (
+        "Deletes the user account and all associated data, including profile, "
+        "sessions, verification tokens, and tea profile notes. "
+        "This action is irreversible."
+    )
+)
+@rate_limiter.limit(LOWEST_RATE_LIMIT)
+def delete_user_account(
+    request: Request,
+    current_user: UserInternalModel = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    with sentry_sdk.start_span(op = AUTH, name = "delete_user_account"):
+        sentry_sdk.set_tag("endpoint", "delete_user_account")
+
+        _require_fresh_login(current_user)
+
+        # Instantiate repos.
+        user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
+        dsar_log_repo = DSARLogRepository(session)
+
+        # Create DSAR log entry .
+        log = dsar_log_repo.create_log(             
+            user_id = current_user.id,
+            request_type = REQUEST_DELETE_USER_ACCOUNT
+        )
+
+        # Instantiate service.
+        user_account_deletion_service = UserAccountDeletionService(
+            session = session,
+            user_tea_profile_notes_repo = user_tea_profile_notes_repo,
+        )
+
+        try:
+            user_account_deletion_service.delete_user_account(current_user.id)
+
+            dsar_log_repo.mark_fulfilled(log.id)  
+
+            return Response(status_code = status.HTTP_204_NO_CONTENT)
+
+        except Exception as e:
+            dsar_log_repo.mark_failed(log.id, notes = str(e)) 
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "Failed to delete user account.",
             )

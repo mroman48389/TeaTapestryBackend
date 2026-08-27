@@ -28,6 +28,7 @@ from src.db.models.tea_profiles_model import TeaProfileModel
 from src.db.models.auth.user_models import UserInternalModel # noqa: F401
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel
 from src.db.models.auth.session_token_model import SessionTokenModel
+from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
 from src.utils.session_utils import get_session 
 from src.utils.model_utils import get_model_column_names
 from src.utils.auth.password_utils import hash_password
@@ -39,6 +40,7 @@ from src.utils.auth.jwt_utils import (
 from tests.utils.test_utils import get_empty_user_tea_profile_notes_body
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 from src.constants.jwt_constants import REFRESH_TOKEN_LIFETIME_DAYS
+from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
 
 # Remove the verbose SQL statements we don't care about from the TERMINAL 
 # output.
@@ -109,6 +111,7 @@ def create_test_db():
         connection.close()
         engine.dispose()
 
+
 @pytest.fixture
 def client(create_test_db):
     # Override FastAPI's DB dependency so routes use the test DB. 
@@ -129,10 +132,12 @@ def client(create_test_db):
     # Clean up after test
     app.dependency_overrides.clear()
 
+
 @pytest.fixture
 def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
     obj = create_test_db.query(TeaProfileModel).filter_by(name = "Long Jing").first()
     return obj.id
+
 
 @pytest.fixture
 def seed_tea_profiles(create_test_db):
@@ -158,6 +163,7 @@ def seed_tea_profiles(create_test_db):
         wet_leaf_aroma=["fresh"]
     ))
     create_test_db.commit()
+
 
 @pytest.fixture
 def seed_user_tea_profile_notes(create_test_db, test_user, long_jing_tea_profile_id):
@@ -231,6 +237,7 @@ def create_test_csv(tmp_path):
     
     return _create_csv
 
+
 @pytest.fixture
 def test_user(create_test_db):
     user = UserInternalModel(
@@ -245,9 +252,23 @@ def test_user(create_test_db):
 
     return user
 
+
+@pytest.fixture
+def user_tea_profile_notes_repo(create_test_db):
+    return UserTeaProfileNotesRepository(create_test_db)
+
+
+@pytest.fixture
+def empty_user_tea_profile_notes_inbound():
+    body = get_empty_user_tea_profile_notes_body()
+    return UserTeaProfileNotesInboundSchema(**body)
+
+
+
 @pytest.fixture
 def access_token_for_test_user(test_user):
     return create_access_token(str(test_user.id), test_user.is_verified)
+
 
 # Return just the raw refresh token for a test user. Use this if the test 
 # does NOT interact with the refresh endpoint or session DB.
@@ -258,6 +279,7 @@ def refresh_token_for_test_user(test_user):
         email_verified = test_user.is_verified, 
         refresh_token_id = str(uuid.uuid4())
     )
+
 
 # Use this for the refresh endpoint, or, in general, when a valid refresh
 # session in the database is required.

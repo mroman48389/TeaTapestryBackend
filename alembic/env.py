@@ -19,6 +19,7 @@ from src.db.models.tea_profiles_model import TeaProfileModel # noqa: F401
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel # noqa: F401
 from src.db.models.auth.verification_token_model import VerificationTokenModel  # noqa: F401
 from src.db.models.auth.session_token_model import SessionTokenModel #noqa: F401
+from src.db.models.auth.dsar_log_model import DSARLogModel #noqa: F401
 
 # Disable interpolation globally for Alembic's config parser
 configparser.BasicInterpolation = None

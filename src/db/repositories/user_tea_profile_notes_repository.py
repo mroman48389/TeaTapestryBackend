@@ -7,6 +7,7 @@ from __future__ import annotations
 # later, once the user can add their own tea profiles: from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy import delete
 from uuid import UUID
 
 from src.app.errors import (
@@ -215,7 +216,7 @@ class UserTeaProfileNotesRepository:
             ) from exc
     
     # Delete a row of user tea profile notes.
-    def delete(self, note_id: UUID) -> None:
+    def delete_by_note_id(self, note_id: UUID) -> None:
 
         try:
             user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
@@ -236,3 +237,15 @@ class UserTeaProfileNotesRepository:
                 "Failed to delete user tea profile notes.",
                 details = {"note_id": note_id},
             ) from exc
+
+    def delete_by_user_id(self, user_id: UUID) -> None:
+
+        # Delete all notes associated with this user.
+        self._session.execute(
+            delete(UserTeaProfileNotesModel).where(
+                UserTeaProfileNotesModel.user_id == user_id
+            )
+        )
+
+        self._session.commit()
+        
