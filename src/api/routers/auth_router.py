@@ -53,6 +53,7 @@ from src.constants.jwt_constants import (
     ACCESS_TOKEN_LIFETIME_MINUTES,
     REFRESH_TOKEN_LIFETIME_DAYS
 )
+from src.constants.cookie_constants import SAME_SITE_VALUE
 from src.utils.auth.jwt_utils import (
     create_access_token
 )
@@ -673,7 +674,7 @@ def login(
             value = raw_refresh_token,
             httponly = True,
             secure = not is_local,
-            samesite = "lax",
+            samesite = SAME_SITE_VALUE,
             path = "/",
             max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
         )
@@ -683,7 +684,7 @@ def login(
             value = access_token,
             httponly = True,
             secure = not is_local,
-            samesite = "lax",
+            samesite = SAME_SITE_VALUE,
             path = "/",
             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )
@@ -962,7 +963,7 @@ def refresh_token(
         # the refresh token by revoking the old session and creating a new one.
         # This prevents stolen refresh tokens from being reused.
         #
-        # Refresh tokens are stored as HttpOnly, SameSite = Lax cookies,
+        # Refresh tokens are stored as HttpOnly, SameSite = SAME_SITE_VALUE,
         # protecting them from JavaScript access and CSRF attacks.
 
         response.headers["Cache-Control"] = "no-store"
@@ -1090,7 +1091,7 @@ def refresh_token(
             value = new_raw_refresh_token,
             httponly = True,
             secure = not is_local,
-            samesite = "lax",
+            samesite = SAME_SITE_VALUE,
             path = "/",
             max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
         )
@@ -1100,7 +1101,7 @@ def refresh_token(
             value = new_access_token,
             httponly = True,
             secure = not is_local,
-            samesite = "lax",
+            samesite = SAME_SITE_VALUE,
             path = "/",
             max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
         )

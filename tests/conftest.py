@@ -260,7 +260,7 @@ def user_tea_profile_notes_repo(create_test_db):
 
 @pytest.fixture
 def empty_user_tea_profile_notes_inbound():
-    body = get_empty_user_tea_profile_notes_body()
+    body = get_empty_user_tea_profile_notes_body(as_json = True)
     return UserTeaProfileNotesInboundSchema(**body)
 
 

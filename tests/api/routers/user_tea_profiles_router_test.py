@@ -95,7 +95,7 @@ class TestCreateUserTeaProfileNotes:
     ):
         response = client.post(
             f"/api/v1/user_tea_profile_notes/{long_jing_tea_profile_id}",
-            json = get_empty_user_tea_profile_notes_body(),
+            json = get_empty_user_tea_profile_notes_body(as_json = True),
             headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
         )
 
@@ -112,7 +112,7 @@ class TestCreateUserTeaProfileNotes:
         refresh_token_for_test_user,
         long_jing_tea_profile_id
     ):
-        body = get_empty_user_tea_profile_notes_body()
+        body = get_empty_user_tea_profile_notes_body(as_json = True)
 
         # First create should work.
         client.post(
@@ -145,7 +145,10 @@ class TestUpdateUserTeaProfileNotes:
     ):
         response = client.patch(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{seed_user_tea_profile_notes.id}",
-            json = {"liquor_taste": "sweet"},
+            json = {
+                "liquor_taste": "sweet",
+                "updated_at": seed_user_tea_profile_notes.updated_at.isoformat()
+            },
             headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
         )
 
@@ -161,11 +164,36 @@ class TestUpdateUserTeaProfileNotes:
     ):
         response = client.patch(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/00000000-0000-0000-0000-000000000000",
-            json = {"liquor_taste": "sweet"},
+            json = {
+                "liquor_taste": "sweet",
+                "updated_at": "2026-01-01T00:00:00Z"
+            },
             headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+    def test_update_user_tea_profile_notes_conflict(
+        self,
+        client,
+        seed_user_tea_profile_notes,
+        access_token_for_test_user,
+        refresh_token_for_test_user
+    ):
+        # Simulate stale client data by sending an older timestamp.
+        stale_timestamp = "2000-01-01T00:00:00Z"
+
+        response = client.patch(
+            f"{USER_TEA_PROFILE_NOTES_PREFIX}/{seed_user_tea_profile_notes.id}",
+            json = {
+                "liquor_taste": "sweet",
+                "updated_at": stale_timestamp
+            },
+            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
 
 
 # ---------------------------------------------------------

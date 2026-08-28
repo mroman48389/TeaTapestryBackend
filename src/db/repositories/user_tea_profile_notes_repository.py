@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 # later, once the user can add their own tea profiles: from sqlalchemy.exc import IntegrityError
+from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy import delete
@@ -187,7 +188,7 @@ class UserTeaProfileNotesRepository:
     def update(
         self, 
         note_id: UUID, 
-        inbound_schema: UserTeaProfileNotesInboundSchema
+        updated_data: dict[str, Any]
     ) -> UserTeaProfileNotesModel:
         
         try:
@@ -199,7 +200,7 @@ class UserTeaProfileNotesRepository:
                     details = {"note_id": note_id},
                 )
 
-            for field, value in inbound_schema.model_dump().items():
+            for field, value in updated_data.items():
                 setattr(user_tea_profile_notes, field, value)
 
             self._session.commit()

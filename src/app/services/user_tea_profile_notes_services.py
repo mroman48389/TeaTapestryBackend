@@ -101,14 +101,37 @@ class UserTeaProfileNotesService:
         try:
             user_tea_profile_notes = self._repo.get_by_note_id(note_id)
 
-            # Ownership check
+            # Make sure the note belongs to this user.
             if user_tea_profile_notes.user_id != user_id:
                 raise HTTPException(
                     status_code = status.HTTP_403_FORBIDDEN,
                     detail = "You do not have permission to modify this note.",
                 )
 
-            updated_user_tea_profile_notes = self._repo.update(note_id, inbound_schema)
+            # To update the data, we assume that the updated_at should be the one attached
+            # to the notes in the database. This is because the client should always have
+            # the updated_at value from the last time the data was fetched. If it's not 
+            # the same value, one of the following happened and we will reject the change:
+            #
+            #     1) client is editing stale data
+            #     2) the data changed after it was last fetched by the client
+            #     3) another device or tab updated the data
+            #     4) the client is trying to overwrite a newer version.
+            if inbound_schema.updated_at != user_tea_profile_notes.updated_at:
+                raise HTTPException(
+                    status_code = status.HTTP_409_CONFLICT,
+                    detail = {
+                        "client_updated_at": inbound_schema.updated_at.isoformat(),
+                        "server_updated_at": user_tea_profile_notes.updated_at.isoformat(),
+                    }
+                )
+
+            # Remove updated_at so repo.update() never touches it. updated_at should only
+            # ever be touched by the database itself, since we set onupdate in the model.
+            updated_data = inbound_schema.model_dump()
+            updated_data.pop("updated_at", None)
+        
+            updated_user_tea_profile_notes = self._repo.update(note_id, updated_data)
             
             return UserTeaProfileNotesOutboundSchema.model_validate(updated_user_tea_profile_notes)
 

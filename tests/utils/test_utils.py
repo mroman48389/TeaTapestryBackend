@@ -56,8 +56,18 @@ def get_auth_headers(access_token: str, refresh_token: str):
         "Cookie": f"access_token={access_token}; refresh_token={refresh_token}"
     }
 
-def get_empty_user_tea_profile_notes_body():
-    return UserTeaProfileNotesInboundSchema().model_dump()
+def get_empty_user_tea_profile_notes_body(as_json: bool = False):
+    dt = datetime.now(timezone.utc)
+    body = UserTeaProfileNotesInboundSchema(updated_at = dt).model_dump()
+
+    # Use ISO strings when simulating API input and datetime when 
+    # inserting into the DB (such as during seeding).
+    if as_json:
+        body["updated_at"] = dt.isoformat()
+    else:
+        body["updated_at"] = dt
+
+    return body
 
 def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
     """

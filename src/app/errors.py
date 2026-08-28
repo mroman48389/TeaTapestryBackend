@@ -50,3 +50,6 @@ class UserTeaProfileNotesQueryError(DomainError):
 
 class UserTeaProfileNotesAlreadyExistError(DomainError):
     """Raised when trying to create notes that already exist."""
+
+class UserTeaProfileNotesConflictError(DomainError):
+    """Raised when user tea profile notes existing update timestamp differs from an incoming one"""
