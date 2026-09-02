@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from src.db.models.auth.dsar_log_model import DSARLogModel
 from src.constants.dsar_constants import (
-    STATUS_PENDING,
-    STATUS_FULFILLED,
-    STATUS_FAILED,
+    DSAR_STATUS_PENDING,
+    DSAR_STATUS_FULFILLED,
+    DSAR_STATUS_FAILED,
 )
 
 
@@ -27,7 +27,7 @@ class DSARLogRepository:
         log = DSARLogModel(
             user_id = user_id,
             request_type = request_type,
-            status = STATUS_PENDING,
+            status = DSAR_STATUS_PENDING,
             notes = notes,
         )
 
@@ -43,7 +43,7 @@ class DSARLogRepository:
         log = self.session.get(DSARLogModel, log_id)
 
         if log:
-            log.status = STATUS_FULFILLED
+            log.status = DSAR_STATUS_FULFILLED
             log.fulfilled_at = datetime.now(timezone.utc)
             self.session.commit()
 
@@ -53,7 +53,7 @@ class DSARLogRepository:
         log = self.session.get(DSARLogModel, log_id)
 
         if log:
-            log.status = STATUS_FAILED
+            log.status = DSAR_STATUS_FAILED
             log.notes = notes
             log.fulfilled_at = datetime.now(timezone.utc)
             self.session.commit()

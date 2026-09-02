@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models.auth.dsar_log_model import DSARLogModel
 
-from src.constants.dsar_constants import RETENTION_DAYS
+from src.constants.dsar_constants import DSAR_RETENTION_DAYS
 
 # DSAR logs must be purged at least after every 12 months.
 # TODO (Staging/Production):
@@ -18,7 +18,7 @@ class DSARRetentionService:
         self.session = session
 
     def delete_old_logs(self) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(days = RETENTION_DAYS)
+        cutoff = datetime.now(timezone.utc) - timedelta(days = DSAR_RETENTION_DAYS)
 
         # Use synchronize_session = False because this bulk delete runs outside any
         # request/response cycle and we don't need ORM state synchronization. It avoids

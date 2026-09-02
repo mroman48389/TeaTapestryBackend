@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from src.db.models.auth.dsar_log_model import DSARLogModel
 from src.maintenance_services.dsar_retention_service import DSARRetentionService
-from src.constants.dsar_constants import REQUEST_EXPORT_USER_DATA, STATUS_PENDING
+from src.constants.dsar_constants import DSAR_REQUEST_EXPORT_USER_DATA, DSAR_STATUS_PENDING
 
 
 class TestDSARRetentionService:
@@ -15,16 +15,16 @@ class TestDSARRetentionService:
 
         old_log = DSARLogModel(
             user_id = user_id,
-            request_type = REQUEST_EXPORT_USER_DATA,
-            status = STATUS_PENDING,
+            request_type = DSAR_REQUEST_EXPORT_USER_DATA,
+            status = DSAR_STATUS_PENDING,
             requested_at = datetime.now(timezone.utc) - timedelta(days = 400),
         )
         create_test_db.add(old_log)
 
         recent_log = DSARLogModel(
             user_id = user_id,
-            request_type = REQUEST_EXPORT_USER_DATA,
-            status = STATUS_PENDING,
+            request_type = DSAR_REQUEST_EXPORT_USER_DATA,
+            status = DSAR_STATUS_PENDING,
             requested_at =datetime.now(timezone.utc) - timedelta(days = 10),
         )
         create_test_db.add(recent_log)

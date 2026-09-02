@@ -5,7 +5,7 @@ from sqlalchemy import String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
-from src.constants.dsar_constants import STATUS_PENDING
+from src.constants.dsar_constants import DSAR_STATUS_PENDING
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 # Under CTDPA, CCPA / CPRA, GDPR, etc., users have legal rights called DSARs 
@@ -35,7 +35,7 @@ class DSARLogModel(Base):
     status: Mapped[str] = mapped_column(
         String,
         nullable = False,
-        default = STATUS_PENDING
+        default = DSAR_STATUS_PENDING
     )
 
     requested_at: Mapped[datetime] = mapped_column(

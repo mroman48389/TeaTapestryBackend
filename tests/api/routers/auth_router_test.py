@@ -26,11 +26,11 @@ from src.constants.route_constants import (
     AUTH_DELETE_USER_ACCOUNT_PREFIX,
 )
 from src.constants.dsar_constants import (
-    REQUEST_DELETE_USER_ACCOUNT,
-    REQUEST_DELETE_USER_DATA,
-    REQUEST_EXPORT_USER_DATA,
-    STATUS_FULFILLED,
-    STATUS_FAILED
+    DSAR_REQUEST_DELETE_USER_ACCOUNT,
+    DSAR_REQUEST_DELETE_USER_DATA,
+    DSAR_REQUEST_EXPORT_USER_DATA,
+    DSAR_STATUS_FULFILLED,
+    DSAR_STATUS_FAILED
 )
 from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.db.models.auth.dsar_log_model import DSARLogModel
@@ -1084,8 +1084,8 @@ class TestAuthExportUserData:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].request_type == REQUEST_EXPORT_USER_DATA
-        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].request_type == DSAR_REQUEST_EXPORT_USER_DATA
+        assert dsar_logs[0].status == DSAR_STATUS_FULFILLED
         assert dsar_logs[0].fulfilled_at is not None
 
 
@@ -1135,7 +1135,7 @@ class TestAuthExportUserData:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to export user data."
         assert dsar_logs[0].fulfilled_at is not None
 
@@ -1231,8 +1231,8 @@ class TestAuthDeleteUserData:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].request_type == REQUEST_DELETE_USER_DATA
-        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].request_type == DSAR_REQUEST_DELETE_USER_DATA
+        assert dsar_logs[0].status == DSAR_STATUS_FULFILLED
         assert dsar_logs[0].fulfilled_at is not None
 
 
@@ -1289,7 +1289,7 @@ class TestAuthDeleteUserData:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to delete user data."
         assert dsar_logs[0].fulfilled_at is not None
 
@@ -1345,8 +1345,8 @@ class TestAuthDeleteUserAccount:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].request_type == REQUEST_DELETE_USER_ACCOUNT
-        assert dsar_logs[0].status == STATUS_FULFILLED
+        assert dsar_logs[0].request_type == DSAR_REQUEST_DELETE_USER_ACCOUNT
+        assert dsar_logs[0].status == DSAR_STATUS_FULFILLED
         assert dsar_logs[0].fulfilled_at is not None
 
 
@@ -1404,7 +1404,7 @@ class TestAuthDeleteUserAccount:
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
 
         assert len(dsar_logs) == 1
-        assert dsar_logs[0].status == STATUS_FAILED
+        assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to delete user account."
         assert dsar_logs[0].fulfilled_at is not None
 

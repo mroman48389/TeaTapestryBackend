@@ -15,3 +15,8 @@ Access Request) compliance, user data deletion, and privacy obligations.
 - [x] Downloadable JSON file for data export (optional but user-friendly)
 - [ ] Audit logging for DSAR exports and deletions
 
+## Session Token Retention
+- [ ] Document retention period for SessionTokenModel (IP, user agent)
+- [ ] Implement automatic cleanup of expired session tokens
+- [ ] Automated cleanup job (local)
+- [ ] Automated cleanup job (Fly.io)

@@ -1,4 +1,4 @@
-# DSAR Log Cleanup
+# Session Cleanup
 
 ## 1. Local Setup via Windows Task Scheduler
 
@@ -9,7 +9,7 @@
 > 2. Create a new task:
 >
 >    In the right panel, click "Create Task" (not Create Basic Task).
->    Name it something like "TeaTapestry DSAR Cleanup"
+>    Name it something like "TeaTapestry Session Cleanup"
 >
 > 3. Set the trigger:
 >
@@ -35,7 +35,7 @@
 >    still run the script via
 >
 >    `$env:PYTHONPATH="C:\Proj\TeaTapestryBackend"`
->    `python .\scripts\Maintenance\run_dsar_cleanup.py`
+>    `python .\scripts\Maintenance\run_session_cleanup.py`
 >
 > You can view tasks you created if you click on Task Scheduler Library and 
 > check in the panel to the right.

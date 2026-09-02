@@ -83,9 +83,9 @@ from src.constants.route_constants import (
     DELETE_USER_ACCOUNT,
 )
 from src.constants.dsar_constants import (
-    REQUEST_DELETE_USER_ACCOUNT,
-    REQUEST_DELETE_USER_DATA,
-    REQUEST_EXPORT_USER_DATA
+    DSAR_REQUEST_DELETE_USER_ACCOUNT,
+    DSAR_REQUEST_DELETE_USER_DATA,
+    DSAR_REQUEST_EXPORT_USER_DATA
 )
 from src.utils.auth.token_utils import (
     create_raw_verification_token,
@@ -1194,7 +1194,7 @@ def export_user_data(
         # Create DSAR log entry.
         dsar_log = dsar_log_repo.create_log(              
             user_id = current_user.id,
-            request_type = REQUEST_EXPORT_USER_DATA
+            request_type = DSAR_REQUEST_EXPORT_USER_DATA
         )
 
         # Instantiate service.
@@ -1265,7 +1265,7 @@ def delete_user_data(
         # Create DSAR log entry.
         dsar_log = dsar_log_repo.create_log(           
             user_id = current_user.id,
-            request_type = REQUEST_DELETE_USER_DATA
+            request_type = DSAR_REQUEST_DELETE_USER_DATA
         )
 
         # Instantiate service.
@@ -1324,7 +1324,7 @@ def delete_user_account(
         # Create DSAR log entry .
         log = dsar_log_repo.create_log(             
             user_id = current_user.id,
-            request_type = REQUEST_DELETE_USER_ACCOUNT
+            request_type = DSAR_REQUEST_DELETE_USER_ACCOUNT
         )
 
         # Instantiate service.
