@@ -1,7 +1,8 @@
 # Tea Tapestry Privacy and Compliance Checklist
 
 This checklist tracks all engineering requirements related to DSAR (Data Subject
-Access Request) compliance, user data deletion, and privacy obligations.
+Access Request) compliance, user data deletion, and privacy obligations. Also
+covers sessions.
 
 ## DSAR Features
 - [x] User data export endpoint
@@ -16,7 +17,7 @@ Access Request) compliance, user data deletion, and privacy obligations.
 - [ ] Audit logging for DSAR exports and deletions
 
 ## Session Token Retention
-- [ ] Document retention period for SessionTokenModel (IP, user agent)
-- [ ] Implement automatic cleanup of expired session tokens
-- [ ] Automated cleanup job (local)
-- [ ] Automated cleanup job (Fly.io)
+- [X] Document retention period for SessionTokenModel (IP, user agent)
+- [X] Implement automatic cleanup of expired and revoked session tokens
+- [X] Automated cleanup job (local)
+- [ ] Automated cleanup job for Fly.io (staging, production)
