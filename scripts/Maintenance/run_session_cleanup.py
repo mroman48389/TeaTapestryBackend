@@ -9,7 +9,10 @@ def main():
 
         num_sessions_deleted = service.delete_old_sessions()
 
-        print(f"Session cleanup complete. Deleted {num_sessions_deleted} expired or revoked sessions.")
+        print(
+            f"Session cleanup complete. "
+            f"Deleted {num_sessions_deleted} expired or revoked sessions."
+        )
 
 
 if __name__ == "__main__":

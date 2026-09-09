@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from starlette import status
 import sentry_sdk
 import uuid
@@ -109,11 +110,17 @@ from src.app.services.user_data_deletion_services import (
 )
 from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
 from src.db.repositories.dsar_log_repository import DSARLogRepository
+from src.constants.auth_constants import (
+    FRESH_LOGIN_WINDOW_SECONDS,
+    CONCURRENT_REFRESH_GRACE_SECONDS
+)
 
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
 
-FRESH_LOGIN_WINDOW_SECONDS = 5 * 60
+
+DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-timing")
+
 
 ###############################################################################
 #################################   Helpers   #################################
@@ -218,13 +225,19 @@ def signup(
         try:
             session.add(new_user)
             session.commit()
-            session.refresh(new_user)
 
-            # Create a verification token for the new user and send them an email
-            # so they can click a link to verify.
-            raw_token = create_raw_verification_token(new_user, session, EMAIL_VERIFICATION)
-            send_verification_email(new_user, raw_token)
+        # Handles concurrency / race conditions. If two signups happen 
+        # at the same time, for ex, both could pass the existing_user
+        # check and one could commit first, leading to the second signup
+        # hitting a DB issue.
+        except IntegrityError:
+            session.rollback()
 
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "A user with this email address already exists."
+            )
+        
         except Exception:
             session.rollback()
             
@@ -234,7 +247,52 @@ def signup(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "An unexpected error occurred while creating the account."
             )
-        
+
+        try:
+            session.refresh(new_user)
+
+        except Exception:
+            # The user row is already committed at this point. Refresh only
+            # reloads server-generated fields (id, defaults). There's nothing to
+            # roll back, and telling the client account creation failed would be
+            # wrong. Log it. downstream code will still need new_user.id, so this
+            # is likely to surface again shortly if the connection is genuinely bad.
+            safe_exception("Unexpected error refreshing new user after signup.")
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "An unexpected error occurred while refreshing the new account."
+            )
+
+        # Create a verification token for the new user .
+        raw_token = create_raw_verification_token(new_user, session, EMAIL_VERIFICATION)
+
+        # We still want to return the user if something went wrong with the verification
+        # token and we don't send the verification email.
+        if raw_token is None:
+            return new_user
+
+        try:
+            session.commit()
+
+        except Exception:
+            session.rollback()
+
+            safe_exception("Failed to commit verification token during signup.")
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "Failed to create verification token.",
+            )
+
+        try:
+            # Send the user an email so they can click a link to verify. Treat this as a 
+            # best effort approach, rolling backing nothing if the email sending fails.
+            
+            send_verification_email(new_user, raw_token)
+
+        except Exception:
+            safe_exception("Error sending verification email during signup.")
+
         # Return the UserOutboundSchema (FastAPI will take the relevant fields from
         # the UserInboundSchema and serialize it into a UserOutboundSchema because
         # of the response_model we set).
@@ -262,7 +320,7 @@ def signup(
 #
 #     4. (Optional) Try calling verify_email again with the same token. It should now fail
 #        because the token has already been used.
-
+#
 @router.post(
     f"/{SEND_VERIFICATION}", 
     status_code = status.HTTP_200_OK,
@@ -285,18 +343,52 @@ def send_verification(
             detail = "Email is already verified."
         )
 
-    # Delete old tokens for this user.
-    session.query(VerificationTokenModel).filter(
-        VerificationTokenModel.user_id == current_user.id,
-        VerificationTokenModel.purpose == EMAIL_VERIFICATION
-    ).delete()
-    session.commit()
+    try:
+        # Delete old tokens for this user.
+        session.query(VerificationTokenModel).filter(
+            VerificationTokenModel.user_id == current_user.id,
+            VerificationTokenModel.purpose == EMAIL_VERIFICATION
+        ).delete()
 
-    # Create a new token.
+        session.commit()
+
+    except Exception:
+        session.rollback()
+
+        safe_exception("Unexpected error deleting old verification tokens.")
+
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail = "An unexpected error occurred while preparing the verification token."
+        )
+
     raw_token = create_raw_verification_token(current_user, session, EMAIL_VERIFICATION)
 
-    # Send (print) the verification link.
-    send_verification_email(current_user, raw_token)
+    if raw_token is None:
+        return SendVerificationResponseSchema(
+            message = "Failed to create token."
+        )
+
+    try:
+        session.commit()
+
+    except Exception:
+        session.rollback()
+
+        safe_exception("Failed to commit verification token.")
+
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail = "Failed to create verification token.",
+        )
+
+    try:
+        # Send (print) the verification link. Treat this as a best effort approach,
+        # rolling backing nothing if the email sending fails.
+        send_verification_email(current_user, raw_token)
+
+    except Exception:
+        safe_exception("Error sending verification email.")
 
     return SendVerificationResponseSchema(message = "Verification email sent.")
 
@@ -368,14 +460,25 @@ def verify_email(
             detail = "User no longer exists."
         )
 
-    # Mark the verification token as used.
-    verification_token.used = True
+    try:
+        # Mark the verification token as used.
+        verification_token.used = True
 
-    # Mark the user as verified and add the time verified.
-    user.is_verified = True
-    user.verified_at = now
+        # Mark the user as verified and add the time verified.
+        user.is_verified = True
+        user.verified_at = now
 
-    session.commit()
+        session.commit()
+
+    except Exception:
+        session.rollback()
+
+        safe_exception("Unexpected error during email verification.")
+
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail = "An unexpected error occurred while verifying the email."
+        )
 
     return VerifyEmailResponseSchema(message = "Email verified successfully.")
 
@@ -426,6 +529,8 @@ def request_password_reset(
         # Prevent caching.
         response.headers["Cache-Control"] = "no-store"
 
+        request_password_reset_msg = "If the email exists, a reset link has been sent."
+
         # Get the user from their email.
         user = session.query(UserInternalModel).filter(
             UserInternalModel.email == payload.email
@@ -437,16 +542,21 @@ def request_password_reset(
         # 
         # Avoid saying the email wasn't found, revealing anything about the user 
         # database, and returning 404 or 400.
-        request_password_reset_msg = "If the email exists, a reset link has been sent."
         if not user:
             return PasswordResetRequestResponseSchema(message =  request_password_reset_msg)
 
-        # Delete old password reset verification tokens for the user.
-        session.query(VerificationTokenModel).filter(
-            VerificationTokenModel.user_id == user.id,
-            VerificationTokenModel.purpose == PASSWORD_RESET
-        ).delete()
-        session.commit()
+        try:
+            # Delete old password reset verification tokens for the user.
+            session.query(VerificationTokenModel).filter(
+                VerificationTokenModel.user_id == user.id,
+                VerificationTokenModel.purpose == PASSWORD_RESET
+            ).delete()
+
+            session.commit()
+
+        except Exception:
+            session.rollback()
+            safe_exception("Unexpected error during password reset request.")
 
         # Create a new password reset token.
         raw_token = create_raw_verification_token(
@@ -458,7 +568,25 @@ def request_password_reset(
         # So we can grab the raw token when testing password resets via Postman.
         safe_debug(f"DEV PASSWORD RESET TOKEN:{raw_token}")
 
-        send_password_reset_email(user, raw_token)
+        try:
+            session.commit()
+
+        except Exception:
+            session.rollback()
+
+            safe_exception("Failed to commit verification token.")
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "Failed to create verification token.",
+            )
+
+        if raw_token is not None:
+            try:
+                send_password_reset_email(user, raw_token)
+
+            except Exception:
+                safe_exception("Error sending password reset email.")
 
         return PasswordResetRequestResponseSchema(message = request_password_reset_msg)
 
@@ -502,13 +630,6 @@ def reset_password(
                 detail = "Invalid or unknown password reset token."
             )
 
-        # Check if the password reset verification token was already used.
-        if verification_token.used:
-            raise HTTPException(
-                status_code = status.HTTP_400_BAD_REQUEST,
-                detail = "This password reset link has already been used."
-            )
-
         # Check to see if the password reset verification token has expired.
         expires_at = verification_token.expires_at
         if expires_at.tzinfo is None:
@@ -535,33 +656,65 @@ def reset_password(
         # Validate password strength of the user's new password.
         validate_password_strength(payload.new_password)
 
-        # Update password.
-        user.hashed_password = hash_password(payload.new_password)
+        try:
+            # Grab the unused password reset verification token. This should only
+            # return one token by virtue of checking the token id, but we include
+            # the used check to ensure only one request can update this row under
+            # concurrency. This is an atomic CAS (compare and swap).
+            updated_verification_token = session.query(VerificationTokenModel).filter(
+                VerificationTokenModel.id == verification_token.id,
+                VerificationTokenModel.used.is_(False)
+            )
 
-        # Mark the password reset verification token as used.
-        verification_token.used = True
+            # Mark it as used.
+            updated = updated_verification_token.update(
+                {VerificationTokenModel.used: True},
+                synchronize_session = False
+            )
 
-        # Revoke all active sessions for this user.
+            # If we failed to mark the token as used, assume the password verfication
+            # token was already used.
+            if updated == 0:
+                raise HTTPException(
+                    status_code = status.HTTP_400_BAD_REQUEST,
+                    detail = "This password reset link has already been used."
+                )
 
-        # Get all session tokens for this user that have not already been revoked. We
-        # are being sure not to re-revoke tokens here so we preserve the original
-        # revoke times.
-        user_session_tokens = session.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == user.id,
-            SessionTokenModel.revoked_at.is_(None)
-        )
+            # Update password
+            user.hashed_password = hash_password(payload.new_password)
 
-        # Update the revoked_at field for those tokens. synchronize_session = False
-        # avoids unnecessary overhead by telling SQLAlchemy we're doing a bulk update
-        # and it shouldn't try to update in-memory ORM objects.
-        user_session_tokens.update(
-            {SessionTokenModel.revoked_at: now},
-            synchronize_session = False
-        )
+            # Get all session tokens for this user that have not already been revoked. We
+            # are being sure not to re-revoke tokens here so we preserve the original
+            # revoke times.
+            user_session_tokens = session.query(SessionTokenModel).filter(
+                SessionTokenModel.user_id == user.id,
+                SessionTokenModel.revoked_at.is_(None)
+            )
+
+            # Revoke all active sessions for this user by updating the revoked_at field 
+            # for their tokens. 
+            user_session_tokens.update(
+                {SessionTokenModel.revoked_at: now},
+                synchronize_session = False
+            )
+            
+            session.commit()
+
+        except HTTPException:
+            # Let controlled errors bubble up
+            raise
+
+        except Exception:
+            session.rollback()
+
+            safe_exception("Unexpected error during password reset.")
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = "An unexpected error occurred while resetting the password."
+            )
 
         delete_auth_token_cookies(request, response)
-
-        session.commit()
 
         return PasswordResetSubmissionResponseSchema(message = "Password reset successfully.")
 
@@ -602,27 +755,30 @@ def login(
     with sentry_sdk.start_span(op = AUTH, name = "login"):
         sentry_sdk.set_tag("endpoint", "login")
 
-        # Prevent caching
-        response.headers["Cache-Control"] = "no-store"
-
         # Look up the user.
         user = session.query(UserInternalModel).filter(
             UserInternalModel.email == payload.email
         ).first()
 
-        # If they were not found, don't authorize.
-        if (not user) or (not verify_password(payload.password, user.hashed_password)):
+        # Make invalid logins take the same amount of time as valid ones rather than
+        # failing faster due to lack of registration. This prevent attackers from 
+        # figuring out which emails have have been registered based on timing differences.
+        # Basically, if the user does not exist, instead of quickly failing, we burn time
+        # by still calling verify password.
+        if user:
+            password_ok = verify_password(payload.password, user.hashed_password)
+        else:
+            verify_password(payload.password, DUMMY_PASSWORD_HASH)  # burn time
+            password_ok = False
+
+        if (not user) or (not password_ok):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "Invalid email or password."
             )
 
-        user.last_login = datetime.now(timezone.utc)
-        session.commit()
-
         # Generate tokens.
         access_token = create_access_token(str(user.id), user.is_verified)
-        # OLD refresh_token = create_refresh_token(str(user.id), user.is_verified)
         raw_refresh_token = secrets.token_urlsafe(32)
         hashed_refresh_token = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
 
@@ -640,7 +796,10 @@ def login(
         )
 
         try: 
+            user.last_login = datetime.now(timezone.utc)
+
             session.add(session_token)
+
             session.commit()
 
         except Exception as exc:
@@ -665,12 +824,14 @@ def login(
 
         response = JSONResponse(content = body.model_dump())
 
+        # Prevent caching
+        response.headers["Cache-Control"] = "no-store"
+
         # Set refresh token cookie. max_age is the number of seconds the browser 
         # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
         # (60 sec / min)
         response.set_cookie(
             key = "refresh_token",
-            # OLD value = refresh_token,
             value = raw_refresh_token,
             httponly = True,
             secure = not is_local,
@@ -715,6 +876,10 @@ def logout(
 
         response.headers["Cache-Control"] = "no-store"
 
+        # We still delete cookies even if DB fails because the browser 
+        # will no longer have the tokens, but we report the failure.
+        delete_auth_token_cookies(request, response)
+
         # Get the raw refresh token from cookie and revoke the session
         # token.
         raw_refresh_token = request.cookies.get("refresh_token")
@@ -736,16 +901,13 @@ def logout(
 
                 except Exception as exc:
                     session.rollback()
+
                     sentry_sdk.capture_exception(exc)
                     
-                    # We still delete cookies even if DB fails because the browser 
-                    # will no longer have the tokens, but we report the failure.
                     raise HTTPException(
                         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail = "Could not revoke session token."
                     ) from exc
-
-        delete_auth_token_cookies(request, response)
 
         return LogoutResponseSchema(message = "Logged out")
 
@@ -923,14 +1085,40 @@ def terminate_session(
                 detail = "Session not found."
             )
 
-        # If already revoked, nothing to do.
-        if session_token.revoked_at is not None:
-            return TerminateSessionResponseSchema(message = "Session already terminated.")
+        try:
+            # Revoke the session if it's not already revoked. Use atomic CAS in
+            # case of concurrent requests so a second commit won't overwrite the
+            # first's timestamp. In this case, it won't really hurt anything,
+            # but we prevent race conditions and set ourselves up better for 
+            # any future modifications.
+            updated_session_token = session.query(SessionTokenModel).filter(
+                SessionTokenModel.id == session_id,
+                SessionTokenModel.user_id == current_user.id,
+                SessionTokenModel.revoked_at.is_(None)
+            )
 
-        # Otherwise, revoke the session.
-        session_token.revoked_at = datetime.now(timezone.utc)
+            updated = updated_session_token.update(
+                {SessionTokenModel.revoked_at: datetime.now(timezone.utc)},
+                synchronize_session = False
+            )
 
-        session.commit()
+            # If we failed to update, assume it was already revoked.
+            if updated == 0:
+                return TerminateSessionResponseSchema(
+                    message = "Session already terminated."
+                )
+
+            session.commit()
+
+        except Exception as exc:
+            session.rollback()
+
+            sentry_sdk.capture_exception(exc)
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail = "Failed to terminate session."
+            ) from exc
 
         return TerminateSessionResponseSchema(message = "Session terminated successfully.")
 
@@ -959,17 +1147,23 @@ def refresh_token(
         # We read the opaque refresh token from the HttpOnly cookie, hash it,
         # and look up the corresponding SessionTokenModel row in the database.
         #
-        # If the session exists, is not expired, and is not revoked, we rotate
-        # the refresh token by revoking the old session and creating a new one.
-        # This prevents stolen refresh tokens from being reused.
+        # We look at the session token's revoked_at. If it's...
         #
-        # Refresh tokens are stored as HttpOnly, SameSite = SAME_SITE_VALUE,
+        #     - NULL: We are dealing with the live session token and will rotate it.
+        #
+        #     - <= CONCURRENT_REFRESH_GRACE_SECONDS: Assume benign concurrency 
+        #       (two refreshes raced for the same token and the other one won). 
+        #       We will treat the session token as expired in this case.
+        #
+        #     - > CONCURRENT_REFRESH_GRACE_SECONDS: The session token was already 
+        #       rotated a while ago and is now being replayed (maliciously reused). 
+        #       We will revoke every session for this user.
+        #
+        # Refresh tokens are stored as HttpOnly, SameSite = SAME_SITE_VALUE cookies,
         # protecting them from JavaScript access and CSRF attacks.
 
-        response.headers["Cache-Control"] = "no-store"
-
-        # Get the raw refresh token from the cookie. (The client only sees it as a 
-        # refresh token).
+        # Get the raw opaque refresh token from the cookie and raise an exception if it's 
+        # missing.
         raw_refresh_token = request.cookies.get("refresh_token")
 
         if not raw_refresh_token:
@@ -978,8 +1172,8 @@ def refresh_token(
                 detail = "Missing refresh token."
             )
 
-        # Hash the opaque refresh token and look up the corresponding session and 
-        # refresh token id.
+        # Hash the raw opaque refresh token and look up the corresponding session and 
+        # refresh token id. Raise an exception if the session can't be found.
         hashed_refresh_token = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
 
         session_token = session.query(SessionTokenModel).filter(
@@ -999,22 +1193,6 @@ def refresh_token(
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo = timezone.utc)
 
-        # Detect refresh token reuse: if the session is already revoked, the token was reused.
-        # Token reuse just means that the refresh token is not the same one the 
-        # session had before.
-        if session_token.revoked_at is not None:
-            user_session_tokens = session.query(SessionTokenModel).filter(
-                SessionTokenModel.user_id == session_token.user_id,
-            )
-
-            user_session_tokens.update({SessionTokenModel.revoked_at: now})
-            session.commit()
-
-            raise HTTPException(
-                status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Refresh token reuse detected. All sessions revoked."
-            )
-
         # Make sure the refresh token isn't expired.
         if expires_at < now:
             raise HTTPException(
@@ -1022,7 +1200,96 @@ def refresh_token(
                 detail = "Refresh token expired."
             )
 
-        # Now that we know the session token is good, we can get the user.
+        revoked_at = session_token.revoked_at
+
+        # If the session token was already revoked, check to make sure we
+        # have not run into concurrency or malicious attack issues.
+        if revoked_at is not None:
+
+            # If the revocation occurred within our grace window, assume
+            # it's just a concurrency issue.
+            if revoked_at.tzinfo is None:
+                revoked_at = revoked_at.replace(tzinfo = timezone.utc)
+ 
+            time_since_revocation = (now - revoked_at).total_seconds()
+ 
+            if time_since_revocation <= CONCURRENT_REFRESH_GRACE_SECONDS:
+                raise HTTPException(
+                    status_code = status.HTTP_401_UNAUTHORIZED,
+                    detail = "Refresh token expired or stale."
+                )
+ 
+            # If we reach here, the token was rotated outside the 
+            # grace window. Assume theft and revoke every active session for the user.
+            user_session_tokens = session.query(SessionTokenModel).filter(
+                SessionTokenModel.user_id == session_token.user_id,
+                SessionTokenModel.revoked_at.is_(None)
+            )
+
+            user_session_tokens.update(
+                {SessionTokenModel.revoked_at: now},
+                synchronize_session = False
+            )
+ 
+            session.commit()
+ 
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED, 
+                detail = "Refresh token reuse detected. All sessions revoked."
+            )
+
+        # If we make it here, assume no concurrency, staleness, or malicious intent. 
+        # Prevent double rotation when two refreshes happen concurrently by 
+        # updating the refresh token atomically. That is, ensure the refresh token
+        # is updated in a single operation (exactly one call to "update"). 
+        # The operation should either succeed or do nothing with no partial updates.
+        new_refresh_token_id = uuid.uuid4()
+        new_raw_refresh_token = secrets.token_urlsafe(32)
+        new_hashed_refresh_token = hashlib.sha256(
+            new_raw_refresh_token.encode()
+        ).hexdigest()
+
+        updated_session_token = session.query(SessionTokenModel).filter(
+            SessionTokenModel.id == session_token.id,
+            SessionTokenModel.revoked_at.is_(None)
+        )
+
+        token_updated = updated_session_token.update(
+            {
+                SessionTokenModel.refresh_token_id: new_refresh_token_id,
+                SessionTokenModel.revoked_at: now
+            },
+            synchronize_session = False
+        )
+
+        # If the token was not updated, another request already rotated the token.
+        if token_updated == 0:
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED, 
+                detail = "Refresh token expired."
+            )
+
+        # Create new session token with the new refresh token. Why? A new session 
+        # token is created rather than modifying the old one so we can preserve 
+        # the old session for auditing, detect token reuse, support multi‑device login, and 
+        # safely handle concurrent refreshes. Modifying the existing row
+        # would erase this history and break these guarantees.
+
+        expires_at = now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS)
+        new_session_token = SessionTokenModel(
+            user_id = session_token.user_id,
+            refresh_token_hash = new_hashed_refresh_token,
+            refresh_token_id = new_refresh_token_id,
+            created_at = now,
+            expires_at = expires_at,
+            user_agent = get_user_agent(request),
+            ip_address = get_client_ip(request)
+        )
+
+        session.add(new_session_token)
+        session.commit()
+
+        # Issue new access token
         user = session.query(UserInternalModel).filter(
             UserInternalModel.id == session_token.user_id
         ).first()
@@ -1032,45 +1299,6 @@ def refresh_token(
                 status_code = status.HTTP_401_UNAUTHORIZED,
                 detail = "User no longer exists."
             )
-
-        # Rotate the refresh token. Generate a new refresh token id,
-        # raw refresh token, and hashed refresh token.
-        new_refresh_token_id = uuid.uuid4()
-
-        new_raw_refresh_token = secrets.token_urlsafe(32)
-        new_hashed_refresh_token = hashlib.sha256(
-            new_raw_refresh_token.encode()
-        ).hexdigest()
-
-        created_at = now
-        expires_at = now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS)
-
-        new_session_token = SessionTokenModel(
-            user_id = user.id,
-            refresh_token_hash = new_hashed_refresh_token,
-            refresh_token_id = new_refresh_token_id,
-            created_at = created_at,
-            expires_at = expires_at,
-            user_agent = get_user_agent(request),
-            ip_address = get_client_ip(request)
-        )
-
-        # Revoke the old session token.
-        session_token.revoked_at = now
-
-        # Commit DB changes.
-        try:
-            session.add(new_session_token)
-            session.commit()
-
-        except Exception as exc:
-            session.rollback()
-            sentry_sdk.capture_exception(exc)
-
-            raise HTTPException(
-                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Could not rotate session token."
-            ) from exc
 
         # Issue a new access token.
         new_access_token = create_access_token(str(user.id), user.is_verified)
@@ -1085,6 +1313,9 @@ def refresh_token(
         )
 
         response = JSONResponse(content = body.model_dump())
+
+        # Tell client not to cache anything about the response.
+        response.headers["Cache-Control"] = "no-store"
 
         response.set_cookie(
             key = "refresh_token",
@@ -1196,6 +1427,13 @@ def export_user_data(
             user_id = current_user.id,
             request_type = DSAR_REQUEST_EXPORT_USER_DATA
         )
+        # Save log id before the commit, since ORM instances expire after commit.
+        dsar_log_id = dsar_log.id
+
+        # Commit right away so that if something else fails, these logs will not be
+        # rolled back. This is one of the few times we want multiple commits in an 
+        # endpoint.
+        session.commit()  
 
         # Instantiate service.
         user_data_export_service = UserDataExportService(
@@ -1208,22 +1446,33 @@ def export_user_data(
             user_data_JSON_bytes = json.dumps(user_data, indent = 4).encode("utf-8")
             user_data_compressed = gzip.compress(user_data_JSON_bytes)
 
-            dsar_log_repo.mark_fulfilled(dsar_log.id) 
+            dsar_log_repo.mark_fulfilled(dsar_log_id) 
+
+            session.commit()
 
             # Ex: Tea_Tapestry_user_data 24-Aug-2026 at 16-24-00.json
             timestamp = datetime.now().strftime("%d-%b-%Y at %H-%M-%S")
             file_name = f"Tea_Tapestry_user_data {timestamp}.json.gz"
 
-            return StreamingResponse(
+            response = StreamingResponse(
                 iter([user_data_compressed]),
                 media_type = "application/json; charset=utf-8",
                 headers = {
                     "Content-Disposition": f'attachment; filename="{file_name}"'
                 },
             )
+
+            # Prevent caching.
+            response.headers["Cache-Control"] = "no-store"
+
+            return response
         
         except Exception as e:
-            dsar_log_repo.mark_failed(dsar_log.id, notes = str(e))
+            session.rollback()
+
+            dsar_log_repo.mark_failed(dsar_log_id, notes = str(e))
+
+            session.commit()
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1266,7 +1515,14 @@ def delete_user_data(
         dsar_log = dsar_log_repo.create_log(           
             user_id = current_user.id,
             request_type = DSAR_REQUEST_DELETE_USER_DATA
-        )
+        )        
+        # Save log id before the commit, since ORM instances expire after commit.
+        dsar_log_id = dsar_log.id
+
+        # Commit right away so that if something else fails, these logs will not be
+        # rolled back. This is one of the few times we want multiple commits in an 
+        # endpoint.
+        session.commit()  
 
         # Instantiate service.
         user_data_deletion_service = UserDataDeletionService(
@@ -1277,12 +1533,18 @@ def delete_user_data(
         try:
             user_data_deletion_service.delete_user_data(current_user.id)
 
-            dsar_log_repo.mark_fulfilled(dsar_log.id)  
+            dsar_log_repo.mark_fulfilled(dsar_log_id)  
+
+            session.commit()
 
             return Response(status_code = status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
-            dsar_log_repo.mark_failed(dsar_log.id, notes = str(e)) 
+            session.rollback()
+
+            dsar_log_repo.mark_failed(dsar_log_id, notes = str(e)) 
+
+            session.commit()
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1322,10 +1584,17 @@ def delete_user_account(
         dsar_log_repo = DSARLogRepository(session)
 
         # Create DSAR log entry .
-        log = dsar_log_repo.create_log(             
+        dsar_log = dsar_log_repo.create_log(             
             user_id = current_user.id,
             request_type = DSAR_REQUEST_DELETE_USER_ACCOUNT
         )
+        # Save log id before the commit, since ORM instances expire after commit.
+        dsar_log_id = dsar_log.id
+
+        # Commit right away so that if something else fails, these logs will not be
+        # rolled back. This is one of the few times we want multiple commits in an 
+        # endpoint.
+        session.commit()  
 
         # Instantiate service.
         user_account_deletion_service = UserAccountDeletionService(
@@ -1336,12 +1605,18 @@ def delete_user_account(
         try:
             user_account_deletion_service.delete_user_account(current_user.id)
 
-            dsar_log_repo.mark_fulfilled(log.id)  
+            dsar_log_repo.mark_fulfilled(dsar_log_id)  
+
+            session.commit()
 
             return Response(status_code = status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
-            dsar_log_repo.mark_failed(log.id, notes = str(e)) 
+            session.rollback()
+
+            dsar_log_repo.mark_failed(dsar_log_id, notes = str(e)) 
+
+            session.commit()
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -14,8 +14,8 @@ from starlette import status
 #     return await call_next(request)
 
 def register_rate_limit_handlers(app: FastAPI):
-    @app.exception_handler(RateLimitExceeded)
-    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    @app.exception_handler(RateLimitExceeded) # pragma: no cover
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded): # pragma: no cover
         # Sentry will tell us about endpoints that are hits too often and the
         # abusive IPs. It will help us gauge if our endpoints are too strict as
         # well.

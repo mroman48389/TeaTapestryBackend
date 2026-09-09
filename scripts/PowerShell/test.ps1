@@ -11,7 +11,8 @@ $srcPath = Join-Path $projectRoot "src"
 # Set PYTHONPATH for this process only
 $env:PYTHONPATH = $srcPath
 
-# Run pytest with explicit rootdir
-pytest --rootdir $projectRoot
+# Run pytest with explicit rootdir. short will give us nicely
+# condensed error messages.
+pytest --rootdir $projectRoot --tb=short -q
 
 Write-Host "Done running tests."

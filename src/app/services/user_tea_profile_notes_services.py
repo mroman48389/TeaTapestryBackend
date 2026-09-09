@@ -11,11 +11,11 @@ from starlette import status
 from src.db.repositories.user_tea_profile_notes_repository import (
     UserTeaProfileNotesRepository
 )
+from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel
 from src.api.schemas.user_tea_profile_notes_schema import (
     UserTeaProfileNotesInboundSchema,
-    UserTeaProfileNotesOutboundSchema,
 )
-from src.app.errors import (
+from src.app.domain_errors import (
     UserTeaProfileNotesNotFoundError,
     UserTeaProfileNotesQueryError,
     UserTeaProfileNotesAlreadyExistError
@@ -30,14 +30,14 @@ class UserTeaProfileNotesService:
         self,
         user_id: UUID,
         tea_profile_id: int,
-    ) -> UserTeaProfileNotesOutboundSchema:
+    ) -> UserTeaProfileNotesModel:
 
         try:
             user_tea_profile_notes = self._repo.get_by_user_and_tea_profile_id(
                 user_id, tea_profile_id
             )
 
-            return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
+            return user_tea_profile_notes
 
         except UserTeaProfileNotesNotFoundError: # pragma: no cover
             raise HTTPException( 
@@ -51,15 +51,11 @@ class UserTeaProfileNotesService:
                 detail = "Failed to fetch user tea profile notes.",
             )
 
-    def get_by_user_id(self, user_id: UUID) -> list[UserTeaProfileNotesOutboundSchema]:
-
+    def get_by_user_id(self, user_id: UUID) -> list[UserTeaProfileNotesModel]:
         try:
             user_tea_profile_notes = self._repo.get_by_user_id(user_id)
 
-            return [
-                UserTeaProfileNotesOutboundSchema.model_validate(entry)
-                for entry in user_tea_profile_notes
-            ]
+            return user_tea_profile_notes
 
         except UserTeaProfileNotesQueryError: # pragma: no cover
             raise HTTPException(
@@ -72,12 +68,12 @@ class UserTeaProfileNotesService:
         user_id: UUID,
         tea_profile_id: int,
         inbound_schema: UserTeaProfileNotesInboundSchema,
-    ) -> UserTeaProfileNotesOutboundSchema:
+    ) -> UserTeaProfileNotesModel:
 
         try:
             user_tea_profile_notes = self._repo.create(user_id, tea_profile_id, inbound_schema)
 
-            return UserTeaProfileNotesOutboundSchema.model_validate(user_tea_profile_notes)
+            return user_tea_profile_notes
 
         except UserTeaProfileNotesAlreadyExistError: # pragma: no cover
             raise HTTPException(
@@ -96,7 +92,8 @@ class UserTeaProfileNotesService:
         user_id: UUID,
         note_id: UUID,
         inbound_schema: UserTeaProfileNotesInboundSchema,
-    ) -> UserTeaProfileNotesOutboundSchema:
+    ) -> UserTeaProfileNotesModel:
+    # ) -> UserTeaProfileNotesOutboundSchema:
 
         try:
             user_tea_profile_notes = self._repo.get_by_note_id(note_id)
@@ -132,8 +129,8 @@ class UserTeaProfileNotesService:
             updated_data.pop("updated_at", None)
         
             updated_user_tea_profile_notes = self._repo.update(note_id, updated_data)
-            
-            return UserTeaProfileNotesOutboundSchema.model_validate(updated_user_tea_profile_notes)
+
+            return updated_user_tea_profile_notes
 
         except UserTeaProfileNotesNotFoundError: # pragma: no cover
             raise HTTPException( 

@@ -9,6 +9,8 @@ def main():
 
         num_logs_deleted = service.delete_old_logs()
 
+        session.commit()
+
         print(f"DSAR cleanup complete. Deleted {num_logs_deleted} old logs.")
 
 

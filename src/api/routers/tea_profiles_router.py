@@ -10,7 +10,7 @@ from starlette import status
 
 from src.utils.session_utils import get_session
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
-from src.api.constants.responses import COMMON_RESPONSES
+from src.api.constants.openapi_responses import COMMON_RESPONSES
 from src.db.repositories.tea_profiles_repository import TeaProfilesRepository
 from src.core.rate_limit.config_rate_limit import HIGH_RATE_LIMIT, LOW_RATE_LIMIT
 from src.core.rate_limit.setup_rate_limit import rate_limiter

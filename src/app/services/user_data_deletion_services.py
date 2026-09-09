@@ -48,8 +48,6 @@ class UserDataDeletionService(_UserDeletionCommon):
 
         self._delete_user_generated_data(user_id)
 
-        self.session.commit()
-
 
 class UserAccountDeletionService(_UserDeletionCommon):
 
@@ -61,4 +59,3 @@ class UserAccountDeletionService(_UserDeletionCommon):
             delete(UserInternalModel).where(UserInternalModel.id == user_id)
         )
 
-        self.session.commit()

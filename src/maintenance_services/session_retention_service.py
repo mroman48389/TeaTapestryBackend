@@ -30,7 +30,7 @@ class SessionRetentionService:
                 or_(
                     SessionTokenModel.expires_at < cutoff,
                     and_(
-                        SessionTokenModel.revoked_at != None,
+                        SessionTokenModel.revoked_at.isnot(None),
                         SessionTokenModel.revoked_at < cutoff
                     )
                 )

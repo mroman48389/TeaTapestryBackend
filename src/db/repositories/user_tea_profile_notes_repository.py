@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import delete
 from uuid import UUID
 
-from src.app.errors import (
+from src.app.domain_errors import (
     UserTeaProfileNotesNotFoundError,
     UserTeaProfileNotesQueryError,
     UserTeaProfileNotesAlreadyExistError
@@ -39,11 +39,11 @@ class UserTeaProfileNotesRepository:
 
     # Store database session.
     def __init__(self, session: Session) -> None:
-        self._session = session
+        self.session = session
 
     def get_by_note_id(self, note_id: UUID) -> UserTeaProfileNotesModel:
         try:
-            user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
+            user_tea_profile_notes = self.session.get(UserTeaProfileNotesModel, note_id)
 
             if user_tea_profile_notes is None:
                 raise UserTeaProfileNotesNotFoundError(
@@ -75,7 +75,7 @@ class UserTeaProfileNotesRepository:
 
         try:        
             user_tea_profile_notes = (
-                self._session.query(UserTeaProfileNotesModel)
+                self.session.query(UserTeaProfileNotesModel)
                 .filter(
                     UserTeaProfileNotesModel.user_id == user_id,
                     UserTeaProfileNotesModel.tea_profile_id == tea_profile_id,
@@ -112,7 +112,7 @@ class UserTeaProfileNotesRepository:
 
         try:        
             return (
-                self._session.query(UserTeaProfileNotesModel)
+                self.session.query(UserTeaProfileNotesModel)
                 .filter(
                     UserTeaProfileNotesModel.user_id == user_id,
                 )
@@ -140,7 +140,7 @@ class UserTeaProfileNotesRepository:
             # specified user and tea profile ids. If they do, raise a domain 
             # exception.
             existing_notes = (
-                self._session.query(UserTeaProfileNotesModel)
+                self.session.query(UserTeaProfileNotesModel)
                 .filter_by(user_id = user_id, tea_profile_id = tea_profile_id)
                 .one_or_none()
             )
@@ -163,9 +163,13 @@ class UserTeaProfileNotesRepository:
                 **inbound_schema.model_dump()
             )
 
-            self._session.add(user_tea_profile_notes)
-            self._session.commit()
-            self._session.refresh(user_tea_profile_notes)
+            self.session.add(user_tea_profile_notes)
+
+            # Flush the new notes so they receive a real primary key and become queryable
+            # within the current transaction. Without flush(), SQLAlchemy only stages the
+            # INSERT in memory, meaning follow‑up repo methods (get/update) cannot load the
+            # row via session.get(note_id).
+            self.session.flush() 
 
             return user_tea_profile_notes
 
@@ -174,7 +178,7 @@ class UserTeaProfileNotesRepository:
             raise
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self._session.rollback()
+            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to create user tea profile notes.",
@@ -192,7 +196,7 @@ class UserTeaProfileNotesRepository:
     ) -> UserTeaProfileNotesModel:
         
         try:
-            user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
+            user_tea_profile_notes = self.session.get(UserTeaProfileNotesModel, note_id)
 
             if user_tea_profile_notes is None: # pragma: no cover
                 raise UserTeaProfileNotesNotFoundError(
@@ -203,13 +207,10 @@ class UserTeaProfileNotesRepository:
             for field, value in updated_data.items():
                 setattr(user_tea_profile_notes, field, value)
 
-            self._session.commit()
-            self._session.refresh(user_tea_profile_notes)
-
             return user_tea_profile_notes
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self._session.rollback()
+            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to update user tea profile notes.",
@@ -220,7 +221,7 @@ class UserTeaProfileNotesRepository:
     def delete_by_note_id(self, note_id: UUID) -> None:
 
         try:
-            user_tea_profile_notes = self._session.get(UserTeaProfileNotesModel, note_id)
+            user_tea_profile_notes = self.session.get(UserTeaProfileNotesModel, note_id)
 
             if user_tea_profile_notes is None: # pragma: no cover
                 raise UserTeaProfileNotesNotFoundError(
@@ -228,11 +229,10 @@ class UserTeaProfileNotesRepository:
                     details = {"note_id": note_id},
                 )
 
-            self._session.delete(user_tea_profile_notes)
-            self._session.commit()
+            self.session.delete(user_tea_profile_notes)
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self._session.rollback()
+            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to delete user tea profile notes.",
@@ -242,11 +242,10 @@ class UserTeaProfileNotesRepository:
     def delete_by_user_id(self, user_id: UUID) -> None:
 
         # Delete all notes associated with this user.
-        self._session.execute(
+        self.session.execute(
             delete(UserTeaProfileNotesModel).where(
                 UserTeaProfileNotesModel.user_id == user_id
             )
         )
 
-        self._session.commit()
         

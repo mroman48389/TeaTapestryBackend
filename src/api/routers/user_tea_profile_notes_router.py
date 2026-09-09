@@ -90,8 +90,19 @@ def create_user_tea_profile_notes(
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "create_user_tea_profile_notes"):
-        return service.create(current_user.id, tea_profile_id, inbound_schema)
+        try:
+            notes = service.create(current_user.id, tea_profile_id, inbound_schema)
 
+            # Commit writes the new notes to the DB and refresh loads them back into the
+            # session ORM object. Refresh is needed to comply with response_model.
+            session.commit()
+            session.refresh(notes) 
+
+            return notes
+        
+        except Exception:
+            session.rollback()
+            raise
 
 @router.patch(
     "/{note_id}",
@@ -110,8 +121,16 @@ def update_user_tea_profile_notes(
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "update_user_tea_profile_notes"):
-        return service.update(current_user.id, note_id, inbound_schema)
+        try:
+            updated_notes = service.update(current_user.id, note_id, inbound_schema)
 
+            session.commit()
+
+            return updated_notes
+        
+        except:
+            session.rollback()
+            raise
 
 @router.delete(
     "/{note_id}",
@@ -128,5 +147,13 @@ def delete_user_tea_profile_notes(
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "delete_user_tea_profile_notes"):
-        service.delete(current_user.id, note_id)
-        return None
+        try:
+            service.delete(current_user.id, note_id)
+
+            session.commit()
+
+            return None
+
+        except:
+            session.rollback()
+            raise

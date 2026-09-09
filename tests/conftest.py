@@ -2,21 +2,24 @@ import os
 
 # Mark the process as a pytest run. The application checks this flag to skip 
 # production startup logicsuch as creating real database tables or connecting 
-# to external services.
+# to external services. Also, don't run Sentry or SlowAPI.
 #
 # NOTE: Must be set before other imports or PYTEST_RUNNING will be false for 
 # all the tests.
 os.environ["PYTEST_RUNNING"] = "true"
+os.environ["SENTRY_DSN"] = ""
+os.environ["DISABLE_SLOWAPI"] = "1"
 
+from sqlalchemy import create_engine, event
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 import pytest
 import csv
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
+import secrets
 # import tracemalloc
 
 import logging
@@ -27,6 +30,7 @@ from src.db.base import Base
 from src.db.models.tea_profiles_model import TeaProfileModel 
 from src.db.models.auth.user_models import UserInternalModel # noqa: F401
 from src.db.models.user_tea_profile_notes_model import UserTeaProfileNotesModel
+from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.db.models.auth.session_token_model import SessionTokenModel
 from src.api.schemas.user_tea_profile_notes_schema import UserTeaProfileNotesInboundSchema
 from src.utils.session_utils import get_session 
@@ -46,6 +50,42 @@ from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfile
 # output.
 logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+
+
+@pytest.fixture(scope = "function")
+def test_engine():
+    # Create an in‑memory SQLite engine. Using StaticPool + check_same_thread = False
+    # ensures all connections share the same in‑memory database.
+    engine = create_engine(
+        "sqlite://",
+        connect_args = {"check_same_thread": False},
+        poolclass = StaticPool
+    )
+
+    # SQLite has foreign key enforcement off by default. Without this, deletes
+    # that violate a foreign key (e.g. deleting a user while a verification
+    # token still references them) succeed silently instead of raising
+    # IntegrityError, which would let real referential-integrity bugs pass
+    # tests undetected.
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    # Automatically re-apply PRAGMA settings on reused connections, as 
+    # connect only fires once when the connection is first created.
+    @event.listens_for(engine, "begin")
+    def set_sqlite_pragma_begin(dbapi_connection):
+        dbapi_connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+    # Create all tables with this engine.
+    Base.metadata.create_all(bind = engine)
+
+    yield engine
+
+    engine.dispose()
+
 
 # Report leaks (slow)
 # tracemalloc.start()
@@ -79,26 +119,9 @@ logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 # matter how many times it's called in the same test. The first time it's called,
 # it sets the database up for use. All subsequent calls simple return the 
 # database that's set up by the first call.
-@pytest.fixture(scope = "function")
-def create_test_db():
-    # Create an in‑memory SQLite engine. Using StaticPool + check_same_thread=False
-    # ensures all connections share the same in‑memory database.
-    engine = create_engine(
-        "sqlite://",
-        connect_args = {"check_same_thread": False},
-        poolclass = StaticPool
-    )
-
-     # Open a single shared connection for the entire test.
-    connection = engine.connect()
-
-    # Create all tables on this connection.
-    Base.metadata.create_all(bind = connection)
-
-    # Create a sessionmaker bound to this shared connection.
-    TestingSessionLocal = sessionmaker(bind = connection)
-
-    # Open a session for the test.
+@pytest.fixture
+def create_test_db(test_engine):
+    TestingSessionLocal = sessionmaker(bind = test_engine)
     db = TestingSessionLocal()
 
     try:
@@ -108,18 +131,21 @@ def create_test_db():
     finally:
         # Ensure resources are cleaned up after each test.
         db.close()
-        connection.close()
-        engine.dispose()
 
 
 @pytest.fixture
-def client(create_test_db):
+def client(test_engine):
+    TestingSessionLocal = sessionmaker(bind = test_engine)
+
     # Override FastAPI's DB dependency so routes use the test DB. 
     def override_get_session():
+        db = TestingSessionLocal()
+
         try:
-            yield create_test_db
+            yield db
+
         finally:
-            pass
+            db.close()
 
     app.dependency_overrides[get_session] = override_get_session
 
@@ -129,57 +155,125 @@ def client(create_test_db):
     with TestClient(app) as c:
         yield c
 
-    # Clean up after test
+    # Clean up after test.
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
-def long_jing_tea_profile_id(create_test_db, seed_tea_profiles):
-    obj = create_test_db.query(TeaProfileModel).filter_by(name = "Long Jing").first()
-    return obj.id
+def long_jing_tea_profile_id(seed_tea_profiles):
+    return seed_tea_profiles.id
 
 
 @pytest.fixture
 def seed_tea_profiles(create_test_db):
-    create_test_db.add(TeaProfileModel(
-        name="Long Jing",
-        alternative_names=["Dragonwell", "Dragon Well"],
-        tea_type="green",
-        cultivars=["Longjing #43"],
-        processing="pan-fired",
-        oxidation_level="low",
-        cultural_significance="Top 10 tea of China",
-        cultural_significance_source="Various",
-        country_of_origin="China",
-        subregions=["Hangzhou"],
-        liquor_appearance=["pale green"],
-        liquor_aroma=["fresh", "chestnut"],
-        liquor_taste=["smooth", "sweet"],
-        liquor_body_mouthfeel=["light"],
-        body_effect=["calming"],
-        dry_leaf_appearance=["flat", "green"],
-        dry_leaf_aroma=["nutty"],
-        wet_leaf_appearance=["tender"],
-        wet_leaf_aroma=["fresh"]
-    ))
+
+    test_tea_profile = TeaProfileModel(
+        name = "Long Jing",
+        alternative_names = ["Dragonwell", "Dragon Well"],
+        tea_type = "green",
+        cultivars = ["Longjing #43"],
+        processing = "pan-fired",
+        oxidation_level = "low",
+        cultural_significance = "Top 10 tea of China",
+        cultural_significance_source = "Various",
+        country_of_origin = "China",
+        subregions = ["Hangzhou"],
+        liquor_appearance = ["pale green"],
+        liquor_aroma = ["fresh", "chestnut"],
+        liquor_taste = ["smooth", "sweet"],
+        liquor_body_mouthfeel = ["light"],
+        body_effect = ["calming"],
+        dry_leaf_appearance = ["flat", "green"],
+        dry_leaf_aroma = ["nutty"],
+        wet_leaf_appearance = ["tender"],
+        wet_leaf_aroma = ["fresh"]
+    )
+
+    create_test_db.add(test_tea_profile)
     create_test_db.commit()
+    create_test_db.refresh(test_tea_profile)
+
+    return test_tea_profile
 
 
 @pytest.fixture
-def seed_user_tea_profile_notes(create_test_db, test_user, long_jing_tea_profile_id):
+def seed_user_tea_profile_notes(
+    create_test_db, 
+    access_token_for_test_user, 
+    long_jing_tea_profile_id
+):
+    user = access_token_for_test_user["user"]
+
     body = get_empty_user_tea_profile_notes_body()
 
     user_tea_profile_notes = UserTeaProfileNotesModel(
-        user_id = test_user.id,
+        user_id = user.id,
         tea_profile_id = long_jing_tea_profile_id,
         **body
     )
 
     create_test_db.add(user_tea_profile_notes)
     create_test_db.commit()
-    create_test_db.refresh(user_tea_profile_notes)
+
+    # Reload both user and notes from the same session so they are both bound to create_test_db.
+    user = create_test_db.get(UserInternalModel,user.id)
+    user_tea_profile_notes = (
+        create_test_db.get(UserTeaProfileNotesModel, user_tea_profile_notes.id)
+    )
 
     return user_tea_profile_notes
+
+
+@pytest.fixture
+def seed_verification_token(create_test_db, create_test_user):
+    """
+        Create a user and a verification token for that user.
+        Returns both the user and the token, bound to a session to 
+        help prevent IntegrityErrors.
+    """
+
+    def _seed_verification_token(
+        purpose,
+        raw_verification_token = None,
+        expires_in_minutes = 30,
+        used = False,
+        **overrides
+    ):
+        # Create the user.
+        user = create_test_user(**overrides)
+
+        # If caller didn't specify a raw token, generate one.
+        raw_verification_token = raw_verification_token or secrets.token_urlsafe(32)
+
+        # Hash the token.
+        token_hash = hashlib.sha256(raw_verification_token.encode()).hexdigest()
+
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes = expires_in_minutes)
+
+        # Create the token row
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = purpose,
+            expires_at = expires_at,
+            used = used,
+        )
+
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        # Reload both objects so they are session-bound.
+        user = create_test_db.get(UserInternalModel, user.id)
+        verification_token = create_test_db.get(VerificationTokenModel, verification_token.id)
+
+        return {
+            "user": user,
+            "raw_token": raw_verification_token,
+            "token": verification_token,
+            "token_hash": token_hash,
+        }
+
+    return _seed_verification_token
 
 
 @pytest.fixture
@@ -239,18 +333,33 @@ def create_test_csv(tmp_path):
 
 
 @pytest.fixture
-def test_user(create_test_db):
-    user = UserInternalModel(
-        email = "testUser@testdomain.com",
-        hashed_password = hash_password("TestPassword@123"),
-        display_name = "Test User"
-    )
+def create_test_user(create_test_db):
 
-    create_test_db.add(user)
-    create_test_db.commit()
-    create_test_db.refresh(user)
+    '''
+        Factory fixture that can create one or more users
+        in tests requiring a user(s) in the DB.
+    '''
+    def _create_test_user(
+        email = "testUser@example.com",
+        password = "MyPassword@123",
+        display_name = "Test User",
+        **overrides
+    ):
+        
+        user = UserInternalModel(
+            email = email,
+            hashed_password = hash_password(password),
+            display_name = display_name,
+            **overrides
+        )
 
-    return user
+        create_test_db.add(user)
+        create_test_db.commit()
+        create_test_db.refresh(user)
+
+        return user
+
+    return _create_test_user
 
 
 @pytest.fixture
@@ -266,28 +375,69 @@ def empty_user_tea_profile_notes_inbound():
 
 
 @pytest.fixture
-def access_token_for_test_user(test_user):
-    return create_access_token(str(test_user.id), test_user.is_verified)
+def access_token_for_test_user(create_test_user):
+
+    user = create_test_user()
+
+    access_token = create_access_token(str(user.id), user.is_verified)
+
+    return {
+        "user": user,
+        "access_token": access_token,
+    }
 
 
 # Return just the raw refresh token for a test user. Use this if the test 
 # does NOT interact with the refresh endpoint or session DB.
 @pytest.fixture
-def refresh_token_for_test_user(test_user):
-    return create_refresh_token(
-        user_id = str(test_user.id), 
-        email_verified = test_user.is_verified, 
+def refresh_token_for_test_user(access_token_for_test_user):
+
+    user = access_token_for_test_user["user"]
+
+    refresh_token = create_refresh_token(
+        user_id = str(user.id), 
+        email_verified = user.is_verified, 
         refresh_token_id = str(uuid.uuid4())
     )
+
+    return refresh_token
+
+
+@pytest.fixture
+def auth_bundle_for_test_user(create_test_user):
+
+    user = create_test_user()
+
+    access_token = create_access_token(
+        str(user.id), 
+        user.is_verified
+    )
+
+    refresh_token = create_refresh_token(        
+        user_id = str(user.id), 
+        email_verified = user.is_verified, 
+        refresh_token_id = str(uuid.uuid4())
+    )
+
+    refresh_token_id = decode_refresh_token(refresh_token).refresh_token_id
+
+    return {
+        "user": user, 
+        "access_token": access_token, 
+        "refresh_token": refresh_token,
+        "refresh_token_id": refresh_token_id,
+    }
 
 
 # Use this for the refresh endpoint, or, in general, when a valid refresh
 # session in the database is required.
 @pytest.fixture
-def refresh_token_bundle_for_test_user(test_user, create_test_db):
+def refresh_token_bundle_for_test_user(create_test_user, create_test_db):
+    user = create_test_user()
+
     raw_refresh_token = create_refresh_token(
-        user_id = str(test_user.id),
-        email_verified = test_user.is_verified,
+        user_id = str(user.id),
+        email_verified = user.is_verified,
         refresh_token_id = str(uuid.uuid4())
     )
 
@@ -298,7 +448,7 @@ def refresh_token_bundle_for_test_user(test_user, create_test_db):
     now = datetime.now(timezone.utc)
 
     session_token = SessionTokenModel(
-        user_id = test_user.id,
+        user_id = user.id,
         refresh_token_hash = refresh_token_hash,
         refresh_token_id = refresh_token_id,
         created_at = now,
@@ -312,7 +462,53 @@ def refresh_token_bundle_for_test_user(test_user, create_test_db):
     create_test_db.commit()
 
     return {
+        "user": user,
         "raw": raw_refresh_token,
         "hashed": refresh_token_hash,
         "id": refresh_token_id,
     }
+
+
+@pytest.fixture
+def email_send_success(monkeypatch):
+    def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "src.api.routers.auth_router.send_email",
+        _noop
+    )
+
+    return _noop
+
+
+@pytest.fixture
+def email_send_failure(monkeypatch):
+    def _fail(*args, **kwargs):
+        raise Exception("Simulated email failure")
+
+    monkeypatch.setattr(
+        "src.api.routers.auth_router.send_email",
+        _fail
+    )
+
+    return _fail
+
+
+@pytest.fixture
+def email_capture(monkeypatch):
+    sent_emails = []
+
+    def _capture(to_email, subject, body):
+        sent_emails.append({
+            "to": to_email,
+            "subject": subject,
+            "body": body,
+        })
+
+    monkeypatch.setattr(
+        "src.api.routers.auth_router.send_email",
+        _capture
+    )
+
+    return sent_emails

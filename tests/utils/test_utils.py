@@ -85,7 +85,6 @@ def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
         )
 
         session.add(verification_token)
-        session.commit()
         
         return raw_token
     

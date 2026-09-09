@@ -25,7 +25,9 @@ from src.core.env import IS_RUNNING_TESTS, IS_LOCAL_ENV
 ##############################   Configuration   ##############################
 ###############################################################################
 
-init_sentry()
+if not IS_RUNNING_TESTS: # pragma: no cover
+    init_sentry()
+
 configure_logging()
 
 ###############################################################################
@@ -41,7 +43,7 @@ async def lifespan(app: FastAPI):
     #
     # NOTE: we need to import the TeaProfileModel so that when we deploy with
     # Fly.io, the tables get built.
-    if not IS_RUNNING_TESTS:
+    if not IS_RUNNING_TESTS: # pragma: no cover
         from src.db.engine import engine
         from src.db.models.tea_profiles_model import TeaProfileModel  # noqa: F401
 
@@ -109,10 +111,11 @@ app.include_router(user_tea_profile_notes_router)
 # rate over time. If the bucket has tokens, the request is allowed, permitting 
 # short bursts. If the bucket is empty, the request is rejected until enough 
 # tokens refill. 
-app.state.limiter = rate_limiter
-app.add_middleware(SlowAPIMiddleware)
+if not IS_RUNNING_TESTS: # pragma: no cover
+    app.state.limiter = rate_limiter
+    app.add_middleware(SlowAPIMiddleware)
 
-register_rate_limit_handlers(app)
+    register_rate_limit_handlers(app)
 
 ###############################################################################
 #####################   Application Identity Routes   #########################

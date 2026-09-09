@@ -6,6 +6,10 @@ from tests.utils.test_utils import (
     get_auth_headers, 
     get_empty_user_tea_profile_notes_body
 )
+from src.utils.auth.jwt_utils import (
+    create_access_token,
+)
+
 
 # ---------------------------------------------------------
 # GET ONE
@@ -20,10 +24,15 @@ class TestGetUserTeaProfileNotesForTea:
         access_token_for_test_user,
         refresh_token_for_test_user,
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+
         # Get the row we just created.
         response = client.get(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{seed_user_tea_profile_notes.tea_profile_id}",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -36,9 +45,14 @@ class TestGetUserTeaProfileNotesForTea:
         access_token_for_test_user,
         refresh_token_for_test_user
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.get(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/999999",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -55,9 +69,14 @@ class TestGetAllUserTeaProfileNotes:
         access_token_for_test_user,
         refresh_token_for_test_user
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.get(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == []
@@ -70,9 +89,14 @@ class TestGetAllUserTeaProfileNotes:
         access_token_for_test_user,
         refresh_token_for_test_user,
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.get(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -93,10 +117,15 @@ class TestCreateUserTeaProfileNotes:
         refresh_token_for_test_user,
         long_jing_tea_profile_id
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.post(
             f"/api/v1/user_tea_profile_notes/{long_jing_tea_profile_id}",
             json = get_empty_user_tea_profile_notes_body(as_json = True),
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -114,18 +143,23 @@ class TestCreateUserTeaProfileNotes:
     ):
         body = get_empty_user_tea_profile_notes_body(as_json = True)
 
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+
         # First create should work.
         client.post(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{long_jing_tea_profile_id}",
             json = body,
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         # Second create should fail.
         response = client.post(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{long_jing_tea_profile_id}",
             json = body,
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_409_CONFLICT)
@@ -143,13 +177,18 @@ class TestUpdateUserTeaProfileNotes:
         access_token_for_test_user,
         refresh_token_for_test_user,
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.patch(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{seed_user_tea_profile_notes.id}",
             json = {
                 "liquor_taste": "sweet",
                 "updated_at": seed_user_tea_profile_notes.updated_at.isoformat()
             },
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -162,13 +201,18 @@ class TestUpdateUserTeaProfileNotes:
         access_token_for_test_user,
         refresh_token_for_test_user
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+                
         response = client.patch(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/00000000-0000-0000-0000-000000000000",
             json = {
                 "liquor_taste": "sweet",
                 "updated_at": "2026-01-01T00:00:00Z"
             },
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -184,13 +228,18 @@ class TestUpdateUserTeaProfileNotes:
         # Simulate stale client data by sending an older timestamp.
         stale_timestamp = "2000-01-01T00:00:00Z"
 
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+
         response = client.patch(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{seed_user_tea_profile_notes.id}",
             json = {
                 "liquor_taste": "sweet",
                 "updated_at": stale_timestamp
             },
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
 
         assert response.status_code == status.HTTP_409_CONFLICT
@@ -206,16 +255,21 @@ class TestDeleteUserTeaProfileNotes:
         self,
         client,
         seed_user_tea_profile_notes,
-        access_token_for_test_user,
         refresh_token_for_test_user,
+        access_token_for_test_user
     ):
+        # Reload the user from the same session that created the notes.
+        user = access_token_for_test_user["user"]
+
         note_id = seed_user_tea_profile_notes.id
         tea_profile_id = seed_user_tea_profile_notes.tea_profile_id
+
+        access_token = create_access_token(str(user.id), user.is_verified)
 
         # Delete the starting tea.
         response = client.delete(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{note_id}",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = get_auth_headers(access_token, refresh_token_for_test_user)
         )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
@@ -223,7 +277,7 @@ class TestDeleteUserTeaProfileNotes:
         # Confirm deletion
         get_resp = client.get(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/{tea_profile_id}",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = get_auth_headers(access_token, refresh_token_for_test_user)
         )
         assert get_resp.status_code == status.HTTP_404_NOT_FOUND
 
@@ -234,8 +288,13 @@ class TestDeleteUserTeaProfileNotes:
         access_token_for_test_user,
         refresh_token_for_test_user
     ):
+        headers = get_auth_headers(
+            access_token_for_test_user["access_token"], 
+            refresh_token_for_test_user
+        )
+
         response = client.delete(
             f"{USER_TEA_PROFILE_NOTES_PREFIX}/00000000-0000-0000-0000-000000000000",
-            headers = get_auth_headers(access_token_for_test_user, refresh_token_for_test_user)
+            headers = headers
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND

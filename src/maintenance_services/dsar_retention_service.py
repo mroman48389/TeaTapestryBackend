@@ -29,6 +29,4 @@ class DSARRetentionService:
             .delete(synchronize_session = False)
         )
 
-        self.session.commit()
-
         return num_deleted_logs

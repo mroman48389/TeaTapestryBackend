@@ -2,36 +2,42 @@ import secrets
 import hashlib
 from datetime import datetime, timezone, timedelta
 
-from src.utils.log_utils import safe_debug, safe_info
+from src.utils.log_utils import safe_debug, safe_info, safe_exception
 from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.constants.app_constants import FRONTEND_BASE_URL
 
 def create_raw_verification_token(user, session, purpose, expiration_minutes = 30):
-    # Generate a secure random token.
-    raw_token_str = secrets.token_urlsafe(32)
+    try:
+        # Generate a secure random token.
+        raw_token_str = secrets.token_urlsafe(32)
 
-    # Hash the token.
-    hashed_token = hashlib.sha256(raw_token_str.encode()).hexdigest()
+        # Hash the token.
+        hashed_token = hashlib.sha256(raw_token_str.encode()).hexdigest()
 
-    # Allow 30 minutes for verification.
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes = expiration_minutes)
+        # Allow 30 minutes for verification.
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes = expiration_minutes)
 
-    # Create the verification token.
-    verification_token = VerificationTokenModel(
-        user_id = user.id,
-        token_hash = hashed_token,
-        expires_at = expires_at,
-        purpose = purpose # ex: EMAIL_VERIFICATION
-    )
+        # Create the verification token.
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = hashed_token,
+            expires_at = expires_at,
+            purpose = purpose # ex: EMAIL_VERIFICATION
+        )
 
-    # Store the token.
-    session.add(verification_token)
-    session.commit()
+        # Store the token.
+        session.add(verification_token)
 
-    safe_info(f"Created {purpose} token for user {user.id}")
+        safe_info(f"Created {purpose} token for user {user.id}")
 
-    # Return the raw token for the email link.
-    return raw_token_str
+        # Return the raw token for the email link.
+        return raw_token_str
+
+    except Exception:
+        safe_exception("Error creating verification token.")
+        
+        return None
+
 
 # Builds links sent by the frontend. Used in emails that the user clicks.
 # The frontend will call the backend to verify the token. 

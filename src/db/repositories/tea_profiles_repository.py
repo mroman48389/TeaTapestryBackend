@@ -13,7 +13,7 @@ from sqlalchemy import String, Text, func
 
 from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 # later, once the user can add their own tea profiles: TeaProfileConflictError
-from src.app.errors import (
+from src.app.domain_errors import (
     TeaProfileNotFoundError,
     TeaProfileQueryError,
 )

@@ -14,7 +14,7 @@ from starlette import status
 from sentry_sdk import set_context
 
 from src.utils.log_utils import safe_error, safe_exception
-from src.app.errors import (
+from src.app.domain_errors import (
     DomainError,
     TeaProfileNotFoundError,
     TeaProfileValidationError,

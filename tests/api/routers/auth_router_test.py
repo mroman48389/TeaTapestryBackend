@@ -1,4 +1,6 @@
 from starlette import status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, Query
 from datetime import datetime, timezone, timedelta
 import uuid
 import hashlib
@@ -26,11 +28,13 @@ from src.constants.route_constants import (
     AUTH_DELETE_USER_ACCOUNT_PREFIX,
 )
 from src.constants.dsar_constants import (
-    DSAR_REQUEST_DELETE_USER_ACCOUNT,
     DSAR_REQUEST_DELETE_USER_DATA,
     DSAR_REQUEST_EXPORT_USER_DATA,
     DSAR_STATUS_FULFILLED,
     DSAR_STATUS_FAILED
+)
+from src.constants.auth_constants import (
+    CONCURRENT_REFRESH_GRACE_SECONDS
 )
 from src.db.models.auth.verification_token_model import VerificationTokenModel
 from src.db.models.auth.dsar_log_model import DSARLogModel
@@ -43,6 +47,8 @@ from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET,
 )
+from src.constants.jwt_constants import REFRESH_TOKEN_LIFETIME_DAYS
+from src.constants.cookie_constants import SAME_SITE_VALUE
 from src.utils.auth.jwt_utils import (
     create_access_token,
     decode_access_token
@@ -50,6 +56,7 @@ from src.utils.auth.jwt_utils import (
 from tests.utils.test_utils import (
     fake_create_token_factory
 )
+from src.utils.auth.jwt_utils import create_refresh_token
 
 # ---------------------------------------------------------
 # SIGNUP
@@ -58,81 +65,231 @@ from tests.utils.test_utils import (
 class TestAuthSignup:
 
     def test_signup_creates_user(self, client, create_test_db):
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert signup_response.status_code == status.HTTP_201_CREATED
 
-        data = response.json()
+        signup_data = signup_response.json()
 
-        assert "id" in data
-        assert "created_at" in data
-        assert data["email"] == payload["email"]
+        assert "id" in signup_data
+        assert "created_at" in signup_data
+        assert signup_data["email"] == signup_payload["email"]
+        assert signup_data["display_name"] == signup_payload["display_name"]
 
-        # Verify user exists in DB.
-        user = create_test_db.query(UserInternalModel).filter_by(email = payload["email"]).first()
+        # Sensitive fields must not leak.
+        assert "password" not in signup_data
+        assert "hashed_password" not in signup_data
+
+        # Make sure we have a user in the DB.
+        user = create_test_db.query(UserInternalModel).filter_by(
+            email = signup_payload["email"]
+        ).first()
 
         assert user is not None
+
+        # Password must be hashed, not stored in plaintext.
+        assert user.hashed_password != signup_payload["password"]
+
+        # Password must be verifiable with the hashing function.
+        assert verify_password(signup_payload["password"], user.hashed_password)
+
+        # Default verification state must be correct
+        assert user.is_verified is False
+        assert user.verified_at is None
+
+        # Now we check the verfication token that was created.
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+
+        assert verification_token is not None
+        assert verification_token.user_id == user.id
+        assert verification_token.token_hash is not None
+        assert verification_token.purpose == EMAIL_VERIFICATION
+        assert verification_token.used is False
+
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
 
     # Note that we need the create_test_db fixture even though we're not using it in 
     # the body of the test because the client fixture overrides FastAPI's get_session 
     # dependency. If we don't include it, the test database will not exist.
-    def test_signup_duplicate_email_rejected(self, client, create_test_db):
-        payload = {
+    def test_signup_duplicate_email_rejected(self, monkeypatch, client, create_test_db):
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
         # Sign up once.
-        client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        first_signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert first_signup_response.status_code == status.HTTP_201_CREATED
 
         # A second signup should fail.
-        response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        second_signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "already exists" in response.json()["detail"]
+        assert second_signup_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "already exists" in second_signup_response.json()["detail"]
+
+
+    def test_signup_integrity_error(self, monkeypatch, client, create_test_db):
+        # Patch the commit method of the Session class so all session instances fail.
+        def raise_integrity_error(*args, **kwargs):
+            raise IntegrityError(
+                "duplicate key", 
+                params = None, 
+                orig = Exception("duplicate key")
+            )
+
+        monkeypatch.setattr(Session, "commit", raise_integrity_error)
+
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
+        assert signup_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert signup_response.json()["detail"] == "A user with this email address already exists."
+
+        # Ensure no user was created.
+        user = create_test_db.query(UserInternalModel).filter_by(
+            email = signup_payload["email"]
+        ).first()
+        assert user is None
+
+        # Ensure no verification token was created
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert verification_token is None
 
 
     def test_signup_hashes_password(self, client, create_test_db):
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
-        user = create_test_db.query(UserInternalModel).filter_by(email = payload["email"]).first()
+        assert signup_response.status_code == status.HTTP_201_CREATED
 
+        user = create_test_db.query(UserInternalModel).filter_by(
+            email = signup_payload["email"]
+        ).first()
+
+        # User must exist.
         assert user is not None
-        assert user.hashed_password != payload["password"]
-        assert verify_password(payload["password"], user.hashed_password)
+
+        # Password must not be stored in plaintext.
+        assert user.hashed_password != signup_payload["password"]
+
+        # Hash must be a bcrypt hash (starts with $2b$ or $2a$).
+        assert user.hashed_password.startswith("$2"), "Password hash is not bcrypt"
+
+        # Hash must validate correctly.
+        assert verify_password(signup_payload["password"], user.hashed_password)
+
+        # Hash must be stable across refresh.
+        create_test_db.refresh(user)
+        assert verify_password(signup_payload["password"], user.hashed_password)
+
 
     def test_signup_creates_verification_token(self, client, create_test_db):
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_201_CREATED
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
 
         # Check DB for email verification token.
-        token = create_test_db.query(VerificationTokenModel).filter_by(
-            user_id = uuid.UUID(response.json()["id"]),
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = uuid.UUID(signup_response.json()["id"]),
             purpose = EMAIL_VERIFICATION
         ).first()
 
-        assert token is not None
-        assert token.used is False
-        assert token.expires_at.replace(tzinfo = timezone.utc) > datetime.now(timezone.utc)
+        # Token must exist.
+        assert verification_token is not None
+
+        # Token must belong to the correct user
+        assert verification_token.user_id == user_id
+
+        # Token must be unused.
+        assert verification_token.used is False
+
+        # Token must expire in the future.
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
+        # Token must have a reasonable expiration window (we use 30 minutes).
+        delta = expires_at - now
+        assert timedelta(minutes = 25) < delta < timedelta(hours = 35)
+
+        # Token hash should be a SHA-256 hex digest, which is always exactly 64 characters.
+        assert isinstance(verification_token.token_hash, str)
+        assert len(verification_token.token_hash) == 64
+
+        # Token must not be mutated after refresh.
+        create_test_db.refresh(verification_token)
+        assert verification_token.used is False
+
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
+
+    def test_signup_raw_token_none(self, monkeypatch, client, create_test_db):
+        # patch create_raw_verification_token where it is used. Force the raw_token to
+        # have a value of None.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token", 
+            lambda *args, **kwargs: None
+        )
+
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
+        assert signup_response.status_code == status.HTTP_201_CREATED
+        signup_data = signup_response.json()
+
+        assert signup_data["email"] == signup_payload["email"]
+
+        # User must exist in the DB.
+        user = create_test_db.query(UserInternalModel).filter_by(
+            email = signup_payload["email"]
+        ).first()
+        assert user is not None
+
+        # No verification token should be created.
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert verification_token is None
+
 
 # ---------------------------------------------------------
 # SEND VERIFICATION
@@ -142,19 +299,21 @@ class TestAuthSendVerification:
 
     def test_send_verification_resend_creates_new_token(self, client, create_test_db):
         # Sign up a user.
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
         user_id = uuid.UUID(signup_response.json()["id"])
 
         # Sign in to authenticate the user.
         login_payload = {
-            "email": payload["email"],
-            "password": payload["password"]
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
         }
 
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
@@ -168,24 +327,277 @@ class TestAuthSendVerification:
         assert email_verification_token is not None
         email_verification_token_hash = email_verification_token.token_hash
 
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
         # Resend a verification link so we can see if we get a different token back from
         # the database. The first verification link should have been sent when we signed up
         # initially.
-        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX)
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
         assert send_verification_response.status_code == status.HTTP_200_OK
+        assert send_verification_response.json()["message"] == "Verification email sent."
 
         # We should have started with one token and should now have two.
-        tokens = create_test_db.query(VerificationTokenModel).filter_by(
+        verification_tokens = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user_id,
             purpose = EMAIL_VERIFICATION
         ).all()
 
         # There should be just one token because send_verificaiton deletes any previous tokens
         # for a given user.
-        assert len(tokens) == 1
+        assert len(verification_tokens) == 1
 
-        # Ensure the new token is different from the first one.
-        assert tokens[0].token_hash != email_verification_token_hash
+        new_token = verification_tokens[0]
+
+        # New token must be different.
+        assert new_token.token_hash != email_verification_token_hash
+
+        # Token must belong to correct user
+        assert new_token.user_id == user_id
+
+        # Token must expire in the future 
+        now = datetime.now(timezone.utc)
+        expires_at = new_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
+
+    def test_send_verification_raw_token_none(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db
+    ):
+        # Sign up a user.
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+
+        # Verify a real token exists BEFORE monkeypatching
+        original_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert original_token is not None
+
+        # Log in to authenticate the user.
+        login_payload = {
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # patch create_raw_verification_token where it is used. Force the raw_token to
+        # have a value of None.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token", 
+            lambda *args, **kwargs: None
+        )
+
+        # It should have failed to create the token but still returned a 200.
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
+
+        assert send_verification_response.status_code == status.HTTP_200_OK
+        assert send_verification_response.json()["message"] == "Failed to create token."
+
+        # Ensure the old token was deleted
+        remaining_tokens = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).all()
+        assert remaining_tokens == []  
+
+
+    def test_send_verification_requires_auth(self, client):
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX)
+
+        assert send_verification_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+    def test_send_verification_user_already_verified(self, client, create_test_db):
+        # Sign up a user.
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+
+        # Mark the user as verified.
+        user = create_test_db.get(UserInternalModel, user_id)
+        user.is_verified = True
+        create_test_db.commit()
+
+        login_payload = {
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
+        }
+
+        # Authenticate
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+
+        assert login_response.status_code == status.HTTP_200_OK
+
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # Attempt to resend verification should fail since the user is already
+        # verified.
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
+
+        assert send_verification_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert send_verification_response.json()["detail"] == "Email is already verified."
+
+
+    def test_send_verification_token_deletion_failure(self, monkeypatch, client, create_test_db):
+        # Create and authenticate user.
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+
+        login_payload = {
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        # Patch commit to fail during deletion stage. Be sure to wait until after login, 
+        # which also uses commit().
+        def raise_exception(*args, **kwargs):
+            raise Exception("delete failure")
+
+        monkeypatch.setattr(Session, "commit", raise_exception)
+
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # Should hit the deletion commit failure path.
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
+
+        assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert send_verification_response.json()["detail"] == (
+            "An unexpected error occurred while preparing the verification token."
+        )
+
+         # Original signup token should still be intact.
+        remaining_tokens = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).all()
+        assert len(remaining_tokens) == 1 
+
+
+    def test_send_verification_token_commit_failure(self, monkeypatch, client, create_test_db):
+        # Create and authenticate user.
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
+        login_payload = {
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+
+        assert login_response.status_code == status.HTTP_200_OK
+
+        # Allow the deletion commit, fail only the second commit. We can simulate
+        # this using a stateful monkeypatch for the commit. Be sure to wait after 
+        # login, since it also uses commit().
+        call_count = {"n": 0}
+
+        def conditional_fail_commit(*args, **kwargs):
+            call_count["n"] += 1
+
+            if call_count["n"] == 2:  
+                raise Exception("Token commit failure.")
+
+        monkeypatch.setattr(Session, "commit", conditional_fail_commit)
+
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # Should hit the token commit failure path.
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
+
+        assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert send_verification_response.json()["detail"] == "Failed to create verification token."
+
+
+    def test_send_verification_email_failure(self, monkeypatch, client, create_test_db):
+        # Patch email sending to fail. You can't normally raise an error with a lambda
+        # function, so use "(_ for _ in ())" to create an empty generator, which has a
+        # .throw() method that raises an exception.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.send_verification_email",
+            lambda *args, **kwargs: (_ for _ in ()).throw(Exception("email failure"))
+        )
+
+        # Create and authenticate user.
+        signup_payload = {
+            "email": "emailFail@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "User"
+        }
+
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+
+        login_payload = {
+            "email": signup_payload["email"],
+            "password": signup_payload["password"]
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        access_token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # Should still succeed.
+        send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
+
+        assert send_verification_response.status_code == status.HTTP_200_OK
+        assert send_verification_response.json()["message"] == "Verification email sent."
+
+        user = create_test_db.get(UserInternalModel, user_id)
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+
+        assert verification_token is not None
 
 
 # ---------------------------------------------------------
@@ -205,31 +617,55 @@ class TestAuthVerifyEmail:
         )
 
         # Sign up.
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
         user_id = uuid.UUID(signup_response.json()["id"])
 
         raw_token = "success_token"
 
-        # Send a verification email.
-        response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
-        assert response.status_code == status.HTTP_200_OK
-
-       # Check to see that the verification token is used.
-        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
-            user_id = user_id
+        # Confirm that a verification token was created.
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        verification_token_original = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
         ).first()
-        assert verification_token.used is True
+
+        assert verification_token_original is not None
+        assert verification_token_original.token_hash == expected_hash
+        assert verification_token_original.user_id == user_id
+
+        # Send a verification email.
+        verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+        assert verify_email_response.status_code == status.HTTP_200_OK
+        assert verify_email_response.json()["message"] == "Email verified successfully."
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+       # Check to see that the verification token is now marked as used.
+        verification_token_modified = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert verification_token_modified.used is True
 
         # Check to see that the user is verified and the verification is time stamped.
         user = create_test_db.query(UserInternalModel).filter_by(id = user_id).first()
         assert user.is_verified is True
         assert user.verified_at is not None
+
+        # The verification token should not be expired.
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token_modified.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
 
 
     def test_verify_email_expired(self, client, create_test_db, monkeypatch):
@@ -243,29 +679,51 @@ class TestAuthVerifyEmail:
         )
 
         # Sign up.
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
         user_id = uuid.UUID(signup_response.json()["id"])
 
         raw_token = "expired_token"
 
-        # Get the token created by signup and change the expiration timestamp.
-        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
-            user_id = user_id
+        # Confirm that a verification token was created. 
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        verification_token_original = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
         ).first()
-        verification_token.expires_at = datetime.now(timezone.utc) - timedelta(hours = 1)
+
+        assert verification_token_original is not None
+        assert verification_token_original.token_hash == expected_hash
+        assert verification_token_original.user_id == user_id
+
+        # Force the token to be expired.
+        verification_token_original.expires_at = datetime.now(timezone.utc) - timedelta(hours = 1)
         create_test_db.commit()
+
+        # Confirm expiration.
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token_original.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at < now
 
         # If we try sending an email verification link, it should fail (since we forced 
         # the token to be expired).
-        response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "expired" in response.json()["detail"]
+        verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+        assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert verify_email_response.json()["detail"] == "This verification link has expired."
+
+        # The verification token should not be marked used.
+        verification_token_modified = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert verification_token_modified.used is False
 
 
     def test_verify_email_used_token(self, client, create_test_db, monkeypatch):
@@ -279,30 +737,165 @@ class TestAuthVerifyEmail:
         )
 
         # Sign up.
-        payload = {
+        signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
             "display_name": "Some User"
         }
 
-        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = payload)
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
         user_id = uuid.UUID(signup_response.json()["id"])
 
         raw_token = "used_token"
 
-        # Mark the verification token as used.
+        # Confirm the token was actually created.
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         verification_token = create_test_db.query(VerificationTokenModel).filter_by(
-            user_id = user_id
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
         ).first()
+
+        assert verification_token is not None
+        assert verification_token.token_hash == expected_hash
+        assert verification_token.user_id == user_id
+
+        # Mark the verification token as used.
         verification_token.used = True
         create_test_db.commit()
 
+        # Make sure it's used in the DB.
+        assert verification_token.used is True
+
         # If we try sending an email verification link, it should fail (since we marked 
         # the token as used).
-        response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "already been used" in response.json()["detail"]
+        verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+        assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert verify_email_response.json()["detail"] == (
+            "This verification link has already been used."
+        )
 
+
+    def test_verify_email_invalid_token(self, client, create_test_db):
+        # Use a token that does not exist in the database
+        verify_email = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token=invalid_token")
+
+        assert verify_email.status_code == status.HTTP_400_BAD_REQUEST
+        assert verify_email.json()["detail"] == "Invalid or unknown verification token."
+
+
+    def test_verify_email_token_deleted_with_user(self, client, create_test_db, monkeypatch):
+        raw_token = "raw_token"
+
+        # Patch token creation so signup uses a known raw token.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(EMAIL_VERIFICATION, raw_token)
+        )
+
+        signup_payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User"
+        }
+
+        # Sign up to create a user and verification token.
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+    
+        # Confirm that the verification token exists for this user.
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+
+        assert verification_token is not None
+        assert verification_token.token_hash == expected_hash
+
+        # Delete the user. The model deletes on cascade, so the verification token should
+        # also get deleted.
+        user = create_test_db.get(UserInternalModel, user_id)
+        create_test_db.delete(user)
+        create_test_db.commit()
+
+        # Now, trying to verify with the old token should fail because the token no longer exists.
+        verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+
+        assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert verify_email_response.json()["detail"] == "Invalid or unknown verification token."
+
+
+    def test_verify_email_commit_failure(self, client, create_test_db, monkeypatch):
+        raw_token = "raw_token"
+
+        # Patch token creation so signup uses a known raw token
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(EMAIL_VERIFICATION, raw_token)
+        )
+
+        signup_payload = {
+            "email": "commitfail@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Commit Fail User"
+        }
+
+        # Sign up.
+        signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+        assert signup_response.status_code == status.HTTP_201_CREATED
+
+        user_id = uuid.UUID(signup_response.json()["id"])
+
+        # Confirm that the token exists.
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+
+        assert verification_token is not None
+        assert verification_token.token_hash == expected_hash
+
+        # Monkeypatch commit to fail on the endpoint's commit.
+        call_count = {"n": 0}
+
+        def fail_on_first_commit(*args, **kwargs):
+            call_count["n"] += 1
+
+            if call_count["n"] == 1:
+                raise Exception("Forced commit failure.")
+
+        monkeypatch.setattr(Session, "commit", fail_on_first_commit)
+
+        # If we try to verify, it should tell us an error occurred.
+        verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
+
+        assert verify_email_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert verify_email_response.json()["detail"] == (
+            "An unexpected error occurred while verifying the email."
+        )
+
+        # Confirm the failed commit's rollback actually reverted the
+        # in-memory mutations the endpoint made before commit() was called.
+        # (verification_token.used, user.is_verified, user.verified_at).
+        create_test_db.expire_all()
+
+        user_after_verify = create_test_db.query(UserInternalModel).filter_by(
+            id = user_id
+        ).first()
+        assert user_after_verify.is_verified is False
+        assert user_after_verify.verified_at is None
+ 
+        verif_token_after_verify = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id,
+            purpose = EMAIL_VERIFICATION
+        ).first()
+        assert verif_token_after_verify.used is False
+ 
 
 # ---------------------------------------------------------
 # REQUEST PASSWORD RESET
@@ -310,30 +903,47 @@ class TestAuthVerifyEmail:
 
 class TestAuthRequestPasswordReset:
 
-    def test_request_password_reset_success(self, client, create_test_db, monkeypatch):
+    def test_request_password_reset_success(
+        self, 
+        client, 
+        create_test_db, 
+        create_test_user, 
+        monkeypatch
+    ):
 
-        # Create a user manually (no signup needed) and add them to the database.
-        user = UserInternalModel(
-            email = "someUsername@somedomain.com",
-            hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
-        )
-        create_test_db.add(user)
-        create_test_db.commit()
+        user = create_test_user()
+
+        # Confirm user exists.
+        assert create_test_db.query(UserInternalModel).filter_by(
+            email = user.email
+        ).first() is not None
+
+        raw_token = "reset_token"
 
         # Monkeypatch token creation so we know the raw token.
         monkeypatch.setattr(
             "src.api.routers.auth_router.create_raw_verification_token",
-            fake_create_token_factory(PASSWORD_RESET, "reset_token")
+            fake_create_token_factory(PASSWORD_RESET, raw_token)
         )
 
-        payload = {"email": "someUsername@somedomain.com"}
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
+        request_password_reset_payload = {"email": user.email}
+
+        request_password_reset_response = client.post(
+            AUTH_REQUEST_PASSWORD_RESET_PREFIX, 
+            json = request_password_reset_payload
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()   
 
         # Recall that we should always get back OK as a security measure.
-        assert response.status_code == status.HTTP_200_OK
-        assert "reset link" in response.json()["message"]
+        assert request_password_reset_response.status_code == status.HTTP_200_OK
+        assert request_password_reset_response.json()["message"] == (
+            "If the email exists, a reset link has been sent."
+        )
 
         # A password reset verification token should exist.
         verification_token = create_test_db.query(VerificationTokenModel).filter_by(
@@ -341,24 +951,35 @@ class TestAuthRequestPasswordReset:
             purpose = PASSWORD_RESET
         ).first()
         assert verification_token is not None
+        assert verification_token.token_hash == expected_hash
+        assert verification_token.user_id == user.id
         assert verification_token.used is False
+
+        now = (datetime.now(timezone.utc))
+        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
 
 
     def test_request_password_reset_nonexistent_email(self, client, create_test_db):
 
         # We could create a user and use a nonexistent email to be perfectly explicit,
         # but it's not necessary.
-        payload = {"email": "someUsername@somedomain.com"}
+        request_password_reset_payload = {"email": "someUsername@somedomain.com"}
 
-        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
+        request_password_reset_response = client.post(
+            AUTH_REQUEST_PASSWORD_RESET_PREFIX, 
+            json = request_password_reset_payload
+        )
 
         # Recall that we should always get back OK as a security measure.
-        assert response.status_code == status.HTTP_200_OK
-        assert "reset link" in response.json()["message"]
+        assert request_password_reset_response.status_code == status.HTTP_200_OK
+        assert request_password_reset_response.json()["message"] == (
+            "If the email exists, a reset link has been sent."
+        )
 
         # No token should have been created.
-        tokens = create_test_db.query(VerificationTokenModel).all()
-        assert len(tokens) == 0
+        verification_tokens = create_test_db.query(VerificationTokenModel).all()
+        assert len(verification_tokens) == 0
 
 
     def test_request_password_reset_deletes_old_tokens(self, client, create_test_db, monkeypatch):
@@ -373,37 +994,130 @@ class TestAuthRequestPasswordReset:
         create_test_db.commit()
 
         # Create an old token and add it to the database.
-        old_token = VerificationTokenModel(
+        old_verification_token = VerificationTokenModel(
             user_id = user.id,
             token_hash = "old_hash",
             purpose = PASSWORD_RESET,
             expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
             used = False
         )
-        create_test_db.add(old_token)
+        create_test_db.add(old_verification_token)
         create_test_db.commit()
+
+        # Confirm old token exists.
+        assert create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id,
+            purpose = PASSWORD_RESET
+        ).count() == 1
+
+        raw_token = "new_token"
+
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
         # Monkeypatch new token creation.
         monkeypatch.setattr(
             "src.api.routers.auth_router.create_raw_verification_token",
-            fake_create_token_factory(PASSWORD_RESET, "new_token")
+            fake_create_token_factory(PASSWORD_RESET, raw_token)
         )
 
-        payload = {"email": "someUsername@somedomain.com"}
+        request_password_reset_payload = {"email": "someUsername@somedomain.com"}
 
         # Recall that we should always get back OK as a security measure.
-        response = client.post(AUTH_REQUEST_PASSWORD_RESET_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_200_OK
+        request_password_reset_response = client.post(
+            AUTH_REQUEST_PASSWORD_RESET_PREFIX, 
+            json = request_password_reset_payload
+        )
+        assert request_password_reset_response.status_code == status.HTTP_200_OK
+        assert request_password_reset_response.json()["message"] == (
+            "If the email exists, a reset link has been sent."
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()  
 
         # The old token should be have been deleted, and there should be only 
         # the new one in the database.
 
-        tokens = create_test_db.query(VerificationTokenModel).filter_by(
+        verification_tokens = create_test_db.query(VerificationTokenModel).filter_by(
             user_id = user.id,
             purpose = PASSWORD_RESET
         ).all()
-        assert len(tokens) == 1
-        assert tokens[0].token_hash == hashlib.sha256("new_token".encode()).hexdigest()
+        assert len(verification_tokens) == 1
+        assert verification_tokens[0].token_hash == expected_hash
+        assert verification_tokens[0].user_id == user.id
+
+        now = datetime.now(timezone.utc)
+        expires_at = verification_tokens[0].expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
+
+    def test_request_password_reset_email_send_failure(self, client, create_test_db, monkeypatch):
+
+        # Create a user manually (no signup needed) and add them to the database.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Confirm user exists.
+        assert create_test_db.query(UserInternalModel).filter_by(
+            email = user.email
+        ).first() is not None
+
+        raw_token = "reset_token"
+
+        expected_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        # Monkeypatch token creation so we know the raw token.
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.create_raw_verification_token",
+            fake_create_token_factory(PASSWORD_RESET, raw_token)
+        )
+
+        # Monkeypatch email sending to fail.
+        def fail_email(*args, **kwargs):
+            raise Exception("Forced email failure.")
+
+        monkeypatch.setattr(
+            "src.api.routers.auth_router.send_password_reset_email",
+            fail_email
+        )
+
+        request_password_reset_payload = {"email": "someUsername@somedomain.com"}
+
+        request_password_reset_response = client.post(
+            AUTH_REQUEST_PASSWORD_RESET_PREFIX,
+            json = request_password_reset_payload
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # Recall that we should always get back OK as a security measure.
+        assert request_password_reset_response.status_code == status.HTTP_200_OK
+        assert request_password_reset_response.json()["message"] == (
+            "If the email exists, a reset link has been sent."
+        )
+
+        # A password reset verification token should exist.
+        verification_token = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id,
+            purpose = PASSWORD_RESET
+        ).first()
+
+        assert verification_token is not None
+        assert verification_token.token_hash == expected_hash
+        assert verification_token.user_id == user.id
+        assert verification_token.used is False
+
+        now = datetime.now(timezone.utc)
+        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
 
 
 # ---------------------------------------------------------
@@ -422,6 +1136,11 @@ class TestAuthResetPassword:
         )
         create_test_db.add(user)
         create_test_db.commit()
+
+        # Confirm user exists.
+        assert create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first() is not None
 
         # Monkeypatch token creation.
         monkeypatch.setattr(
@@ -443,36 +1162,66 @@ class TestAuthResetPassword:
         create_test_db.add(verification_token)
         create_test_db.commit()
 
-        payload = {
+        # Confirm token exists.
+        assert create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id,
+            purpose = PASSWORD_RESET
+        ).count() == 1
+
+        reset_password_payload = {
             "token": raw_token,
             "new_password": "NewPassword@123"
         }
 
         # Recall that we should always get back OK as a security measure.
-        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_200_OK
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_200_OK
+        assert reset_password_response.json()["message"] == "Password reset successfully."
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
 
         # Token should be marked used.
-        updated_token = create_test_db.query(VerificationTokenModel).filter_by(
-            user_id = user.id
-        ).first()
-        assert updated_token.used is True
+        verif_token_after_reset = (
+            create_test_db.query(VerificationTokenModel).filter_by(user_id = user.id).first()
+        )
+        assert verif_token_after_reset.used is True
+        assert verif_token_after_reset.token_hash == token_hash
+        assert verif_token_after_reset.purpose == PASSWORD_RESET
+        assert verif_token_after_reset.user_id == user.id
+
+        expires_at = verif_token_after_reset.expires_at.replace(tzinfo = timezone.utc)
+        now = datetime.now(timezone.utc)
+        assert expires_at > now
 
         # Password should be updated
         updated_user = create_test_db.query(UserInternalModel).filter_by(id = user.id).first()
         assert verify_password("NewPassword@123", updated_user.hashed_password)
+        assert not verify_password("OldPassword@123", updated_user.hashed_password)
 
 
     def test_reset_password_invalid_token(self, client, create_test_db):
         # We could create a user to be perfectly explicit, but it's not necessary for this test.
-        payload = {
+        reset_password_payload = {
             "token": "invalid",
             "new_password": "NewPassword@123"
         }
 
-        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "unknown" in response.json()["detail"]
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert reset_password_response.json()["detail"] == (
+            "Invalid or unknown password reset token."
+        )
+
+        # No tokens should exist
+        assert create_test_db.query(VerificationTokenModel).count() == 0
 
 
     def test_reset_password_expired_token(self, client, create_test_db):
@@ -500,14 +1249,35 @@ class TestAuthResetPassword:
         create_test_db.add(verification_token)
         create_test_db.commit()
 
-        payload = {
+        reset_password_payload = {
             "token": raw_token,
             "new_password": "NewPassword@123"
         }
 
-        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "expired" in response.json()["detail"]
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert reset_password_response.json()["detail"] == (
+            "This password reset link has expired."
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # The password should not have changed and the verification token should be
+        # unused.
+        user_after_reset = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert verify_password("OldPassword@123", user_after_reset.hashed_password)
+
+        verif_token_after_reset = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+        assert verif_token_after_reset.used is False
 
 
     def test_reset_password_used_token(self, client, create_test_db):
@@ -535,14 +1305,309 @@ class TestAuthResetPassword:
         create_test_db.add(token)
         create_test_db.commit()
 
-        payload = {
+        reset_password_payload = {
             "token": raw_token,
             "new_password": "NewPassword@123"
         }
 
-        response = client.post(AUTH_RESET_PASSWORD_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "already been used" in response.json()["detail"]
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert reset_password_response.json()["detail"] == (
+            "This password reset link has already been used."
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # The password should not have changed, but the verification token should still
+        # be marked as used.
+        user_after_reset = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert verify_password("OldPassword@123", user_after_reset.hashed_password)
+
+        verif_token_after_reset = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+        assert verif_token_after_reset.used is True
+
+
+    def test_reset_password_token_deleted_with_user(self, client, create_test_db):
+
+        # Create a user manually.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Confirm user exists.
+        assert create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first() is not None
+
+        # Create a valid token for the user.
+        raw_token = "raw_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        # Delete the user. We delete with on cascade, so this should delete the
+        # token as well.
+        create_test_db.delete(user)
+        create_test_db.commit()
+
+        reset_password_payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert reset_password_response.json()["detail"] == (
+            "Invalid or unknown password reset token."
+        )
+
+
+    def test_reset_password_weak_password(self, client, create_test_db):
+
+        # Create a user and add to the DB.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        raw_token = "raw_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        # Create and add password reset verification token.
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        # Try to reset password with a very weak password.
+        reset_password_payload = {
+            "token": raw_token,
+            "new_password": "weakpassword"   
+        }
+
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert reset_password_response.json()["detail"] == (
+            "Password must contain at least one uppercase letter."
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # Password should not change.
+        user_after_reset = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert verify_password("OldPassword@123", user_after_reset.hashed_password)
+
+        # Token should remain unused.
+        verif_token_after_reset = create_test_db.query(VerificationTokenModel).filter_by(
+            token_hash = token_hash
+        ).first()
+        assert verif_token_after_reset.used is False
+
+
+    def test_reset_password_commit_failure(self, client, create_test_db, monkeypatch):
+        # Create a user
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        raw_token = "raw_token"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        # Monkeypatch commit to fail
+        call_count = {"n": 0}
+
+        def fail_commit(*args, **kwargs):
+            call_count["n"] += 1
+
+            if call_count["n"] == 1:
+                raise Exception("Forced commit failure.")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        reset_password_payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert reset_password_response.json()["detail"] == (
+            "An unexpected error occurred while resetting the password."
+        )
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # Password should not change.
+        user_after_reset = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert verify_password("OldPassword@123", user_after_reset.hashed_password)
+
+        # Token should remain unused.
+        verif_token_after_reset = create_test_db.query(VerificationTokenModel).filter_by(
+            token_hash = token_hash
+        ).first()
+        assert verif_token_after_reset.used is False
+
+
+    def test_reset_password_revokes_all_active_sessions(self, client, create_test_db):
+        # Create a user
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("OldPassword@123"),
+            display_name = "Some User"
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Create two active session tokens.
+        active_session_token_1 = SessionTokenModel(
+            user_id = user.id, 
+            refresh_token_hash = "hash1",
+            created_at = datetime.now(timezone.utc),
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+            revoked_at = None
+        )
+
+        active_session_token_2 = SessionTokenModel(
+            user_id = user.id, 
+            refresh_token_hash = "hash2",
+            created_at = datetime.now(timezone.utc),
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+            revoked_at = None
+        )
+
+        # Create an already-revoked session token.
+        revoked_session_token = SessionTokenModel(
+            user_id = user.id,
+            refresh_token_hash = "hash3",
+            created_at = datetime.now(timezone.utc),
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+            revoked_at = datetime.now(timezone.utc) - timedelta(days = 1)
+        )
+
+        # Add all tokens to DB.
+        create_test_db.add_all([
+            active_session_token_1, active_session_token_2, revoked_session_token
+        ])
+        create_test_db.commit()
+
+        raw_token = "raw_token"
+
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+        # Create and add password reset verification token.
+        verification_token = VerificationTokenModel(
+            user_id = user.id,
+            token_hash = token_hash,
+            purpose = PASSWORD_RESET,
+            expires_at = datetime.now(timezone.utc) + timedelta(hours = 1),
+            used = False
+        )
+        create_test_db.add(verification_token)
+        create_test_db.commit()
+
+        # Reset password.
+        reset_password_payload = {
+            "token": raw_token,
+            "new_password": "NewPassword@123"
+        }
+
+        reset_password_response = client.post(
+            AUTH_RESET_PASSWORD_PREFIX, 
+            json = reset_password_payload
+        )
+        assert reset_password_response.status_code == status.HTTP_200_OK
+        assert reset_password_response.json()["message"] == "Password reset successfully."
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # All active sessions should now be revoked, and there should be 
+        # 3 revoked tokens total (the original one and now the two that were previously
+        # active).
+        session_tokens_after_reset = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id,
+            SessionTokenModel.revoked_at.isnot(None)
+        ).all()
+        assert len(session_tokens_after_reset) == 3  
+
+        # Previously revoked token should retain its original timestamp
+        revoked_session_token_after_reset = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.id == revoked_session_token.id
+        ).first()
+        assert revoked_session_token_after_reset.revoked_at == revoked_session_token.revoked_at
+
+        # Password should be updated.
+        user_after_reset = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert verify_password("NewPassword@123", user_after_reset.hashed_password)
+
+        # Token should be marked used.
+        verif_token_after_reset = create_test_db.query(VerificationTokenModel).filter_by(
+            token_hash = token_hash
+        ).first()
+        assert verif_token_after_reset.used is True
 
 
 # ---------------------------------------------------------
@@ -565,14 +1630,41 @@ class TestAuthLogin:
         create_test_db.commit()
 
         # Log in with the same email and password.
-        payload = {
+        login_payload = {
             "email": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
-        response = client.post(AUTH_LOGIN_PREFIX, json = payload)
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
 
-        assert response.status_code == status.HTTP_200_OK
+        login_response_body = login_response.json()
+        assert login_response_body["token_type"] == "bearer"
+        assert "access_token" in login_response_body
+
+        # Cookies should be set.
+        assert login_response.cookies.get("refresh_token") is not None
+        assert login_response.cookies.get("access_token") is not None
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # Make sure a session token was created.
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+        assert session_token is not None
+        assert session_token.revoked_at is None
+        now = datetime.now(timezone.utc)
+        expires_at = session_token.expires_at.replace(tzinfo = timezone.utc)
+        assert expires_at > now
+
+        # last_login should now be set.
+        user_after_login = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert user_after_login.last_login is not None
 
 
     def test_login_invalid_password(self, client, create_test_db):
@@ -586,27 +1678,52 @@ class TestAuthLogin:
         create_test_db.commit()
 
         # Try to log in with the same email but the wrong password.
-        payload = {
+        login_payload = {
             "email": "someUsername@somedomain.com",
             "password": "WrongPassword@123"
         }
 
-        response = client.post(AUTH_LOGIN_PREFIX, json = payload)
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert "Invalid email or password" in response.json()["detail"]
+        assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert login_response.json()["detail"] == "Invalid email or password."
+
+        # No cookies should be set.
+        assert login_response.cookies.get("refresh_token") is None
+        assert login_response.cookies.get("access_token") is None
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # No session token should be created
+        assert create_test_db.query(SessionTokenModel).count() == 0
+
+        # last_login should not be updated.
+        user_after_login = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert user_after_login.last_login is None
 
 
-    def test_login_unknown_email(self, client):
+    def test_login_unknown_email(self, client, create_test_db):
         # Try to log in with an account that doesn't exist in the database.
-        payload = {
+        login_payload = {
             "email": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
-        response = client.post(AUTH_LOGIN_PREFIX, json = payload)
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert login_response.json()["detail"] == "Invalid email or password."
+
+        # No cookies should be set.
+        assert login_response.cookies.get("refresh_token") is None
+        assert login_response.cookies.get("access_token") is None
+
+        # No session token should be created.
+        assert create_test_db.query(SessionTokenModel).count() == 0
 
 
     def test_login_includes_email_verified_false(self, client, create_test_db):
@@ -620,20 +1737,39 @@ class TestAuthLogin:
         create_test_db.add(user)
         create_test_db.commit()
 
-        payload = {
+        login_payload = {
             "email": "someUsername@somedomain.com",
             "password": "MyPassword@123",
         }
 
         # Log the user in.
-        response = client.post(AUTH_LOGIN_PREFIX, json = payload)
-        assert response.status_code == status.HTTP_200_OK
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        login_response_body = login_response.json()
+        assert login_response_body["token_type"] == "bearer"
 
         # Make sure the email_verified field in the decoded access token is false.
-        access_token = response.json()["access_token"]
-        payload = decode_access_token(access_token)
+        access_token = login_response.json()["access_token"]
+        decoded_access_token = decode_access_token(access_token)
 
-        assert payload.email_verified is False
+        assert decoded_access_token.email_verified is False
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # Make sure a session token was created.
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+        assert session_token is not None
+
+        # last_login should be updated.
+        user_after_login = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert user_after_login.last_login is not None
 
 
     def test_login_includes_email_verified_true(self, client, create_test_db):
@@ -647,20 +1783,220 @@ class TestAuthLogin:
         create_test_db.add(user)
         create_test_db.commit()
 
-        payload = {
+        login_payload = {
             "email": "someUsername@somedomain.com",
             "password": "MyPassword@123",
         }
 
         # Log the user in.
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        # Make sure the email_verified field in the decoded access token is true.
+        access_token = login_response.json()["access_token"]
+        decoded_access_token = decode_access_token(access_token)
+
+        assert decoded_access_token.email_verified is True
+
+         # Cookies must be set.
+        assert login_response.cookies.get("refresh_token") is not None
+        assert login_response.cookies.get("access_token") is not None
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # A session_token should have been created and last_login should no longer be None.
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+        assert session_token is not None
+
+        # last_login updated
+        user_after_login = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert user_after_login.last_login is not None
+
+
+    def test_login_commit_failure(self, client, create_test_db, monkeypatch):
+        # Create and add a new verified user.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Mike Smith",
+            is_verified = True
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        # Monkeypatch commit to fail.
+        call_count = {"n": 0}
+
+        def fail_commit(*args, **kwargs):
+            call_count["n"] += 1
+
+            if call_count["n"] == 1:
+                raise Exception("Forced commit failure.")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        login_payload = {
+            "email": "someUsername@somedomain.com",
+            "password": "MyPassword@123"
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+
+        assert login_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert login_response.json()["detail"] == "Could not create session token."
+
+        # No cookies should be set.
+        assert login_response.cookies.get("refresh_token") is None
+        assert login_response.cookies.get("access_token") is None
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # No session token should exit.
+        assert create_test_db.query(SessionTokenModel).count() == 0
+
+        # last_login should not be updated.
+        user_after_login = create_test_db.query(UserInternalModel).filter_by(
+            id = user.id
+        ).first()
+        assert user_after_login.last_login is None
+
+
+    def test_login_session_token_fields(self, client, create_test_db):
+        # Create and add a new verified user.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Mike Smith",
+            is_verified = True
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        login_payload = {
+            "email": "someUsername@somedomain.com",
+            "password": "MyPassword@123"
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
+        # sessions mutate the same row and we don't want stale data.
+        create_test_db.expire_all()
+
+        # A session token should have been created.
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user.id
+        ).first()
+
+        assert session_token is not None
+
+        # refresh_token_hash must be a valid SHA256 hex string.
+        assert len(session_token.refresh_token_hash) == 64
+        int(session_token.refresh_token_hash, 16)  # must be valid hex
+
+        # created_at must be recent.
+        now = datetime.now(timezone.utc)
+        created_at = session_token.created_at
+
+        # Normalize SQLite naive datetime to UTC aware
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo = timezone.utc)
+
+        assert (now - created_at).total_seconds() < 5
+
+        expires_at = session_token.expires_at
+
+        # Normalize SQLite naive datetime to UTC aware.
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo = timezone.utc)
+
+        # expires_at must be in the future.
+        assert expires_at > now
+
+        # user_agent and ip_address must be set.
+        assert session_token.user_agent is not None
+        assert session_token.ip_address is not None
+
+        # revoked_at must be None.
+        assert session_token.revoked_at is None
+
+
+    def test_login_cookie_flags(self, client, create_test_db):
+        # Create and add a new verified user.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Mike Smith",
+            is_verified = True
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        payload = {
+            "email": "someUsername@somedomain.com",
+            "password": "MyPassword@123"
+        }
+
         response = client.post(AUTH_LOGIN_PREFIX, json = payload)
         assert response.status_code == status.HTTP_200_OK
 
-        # Make sure the email_verified field in the decoded access token is true.
-        access_token = response.json()["access_token"]
-        payload = decode_access_token(access_token)
+        # Cookies must exist.
+        refresh_cookie = response.cookies.get("refresh_token")
+        access_cookie = response.cookies.get("access_token")
+        assert refresh_cookie is not None
+        assert access_cookie is not None
 
-        assert payload.email_verified is True
+        # Cookie flags
+        # NOTE: secure=False for localhost/testserver
+        assert response.headers["set-cookie"].count("HttpOnly") > 0
+        assert response.headers["set-cookie"].count("Path=/") > 0
+        assert response.headers["set-cookie"].count(f"SameSite={SAME_SITE_VALUE}") > 0
+
+        # max_age must be correct
+        assert (
+            f"Max-Age={REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60}" 
+            in response.headers["set-cookie"]
+        )
+
+
+    def test_login_access_token_claims(self, client, create_test_db):
+        # Create and add a new verified user.
+        user = UserInternalModel(
+            email = "someUsername@somedomain.com",
+            hashed_password = hash_password("MyPassword@123"),
+            display_name = "Mike Smith",
+            is_verified = True
+        )
+        create_test_db.add(user)
+        create_test_db.commit()
+
+        login_payload = {
+            "email": "someUsername@somedomain.com",
+            "password": "MyPassword@123"
+        }
+
+        login_response = client.post(AUTH_LOGIN_PREFIX, json=login_payload)
+        assert login_response.status_code == status.HTTP_200_OK
+
+        access_token = login_response.json()["access_token"]
+        decoded_access_token = decode_access_token(access_token)
+
+        # Claims
+        assert decoded_access_token.sub == user.id
+        assert decoded_access_token.email_verified is True
+
+        # Expiration must be in the future
+        now = datetime.now(timezone.utc)
+        assert decoded_access_token.exp > now.timestamp()
 
 
 # ---------------------------------------------------------
@@ -672,7 +2008,6 @@ class TestAuthLogout:
     def test_logout_revokes_session(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
@@ -706,6 +2041,78 @@ class TestAuthLogout:
         assert response.json()["message"] == "Logged out"
 
 
+    def test_logout_with_invalid_refresh_token(self, client, create_test_db):
+        raw_refresh_token = "invalid_token"
+
+        # Set a refresh token cookie that does not correspond to any session row.
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        logout_response = client.post(AUTH_LOGOUT_PREFIX)
+        assert logout_response.status_code == status.HTTP_200_OK
+
+        # No session row should exist for this hash.
+        refresh_token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+
+        assert session_token is None
+
+
+    def test_logout_with_nonexistent_session_token(self, client, create_test_db):
+        # Create a valid-looking refresh token for a fake user. 
+        # Do not insert a session row.
+        raw_refresh_token = create_refresh_token(
+            user_id = str(uuid.uuid4()),
+            email_verified = True,
+            refresh_token_id = str(uuid.uuid4())
+        )
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        logout_response = client.post(AUTH_LOGOUT_PREFIX)
+        assert logout_response.status_code == status.HTTP_200_OK
+
+        refresh_token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+
+        assert session_token is None
+
+
+    def test_logout_revocation_commit_failure(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        refresh_token_hash = refresh_token_bundle_for_test_user["hashed"]
+
+        # Force commit to fail.
+        def fail_commit():
+            raise Exception("DB failure")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+        logout_response = client.post(AUTH_LOGOUT_PREFIX)
+
+        assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert logout_response.json()["detail"] == "Could not revoke session token."
+
+        # Ensure the session row was not revoked.
+        create_test_db.expire_all()
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+
+        assert session_token is not None
+        assert session_token.revoked_at is None
+
+
 # ---------------------------------------------------------
 # LOGOUT ALL
 # ---------------------------------------------------------
@@ -715,17 +2122,16 @@ class TestAuthLogoutAll:
     def test_logout_all_without_cookie_succeeds_and_deletes_cookies(
         self,
         client,
-        test_user,
         create_test_db
     ):
         # Purposefully don't set a refresh token cookie so we can ensure
         # the endpoint still succeeds and deletes auth cookies.
-        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+        logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["message"] == "Logged out of all devices."
+        assert logout_response.status_code == status.HTTP_200_OK
+        assert logout_response.json()["message"] == "Logged out of all devices."
 
-        set_cookie_headers = response.headers.get_list("set-cookie")
+        set_cookie_headers = logout_response.headers.get_list("set-cookie")
 
         # The response should delete both cookies and make them expired.
 
@@ -737,59 +2143,111 @@ class TestAuthLogoutAll:
     def test_logout_all_with_invalid_refresh_token_deletes_cookies(
         self,
         client,
-        test_user,
         create_test_db
     ):
         # Set a refresh token cookie that does NOT correspond to any session.
         client.cookies.set("refresh_token", "fake token")
 
-        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+        logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["message"] == "Logged out of all devices."
+        assert logout_response.status_code == status.HTTP_200_OK
+        assert logout_response.json()["message"] == "Logged out of all devices."
 
         # The response should delete both cookies.
-        set_cookie_headers = response.headers.get_list("set-cookie")
+        set_cookie_headers = logout_response.headers.get_list("set-cookie")
 
         assert any("refresh_token=" in h for h in set_cookie_headers)
         assert any("access_token=" in h for h in set_cookie_headers)
         assert any("Max-Age=0" in h or "expires=" in h for h in set_cookie_headers)
 
         # No sessions should be revoked.
-        user_sessions = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == test_user.id
-        ).all()
-
-        # All sessions should still be unrevoked.
-        for s in user_sessions:
-            assert s.revoked_at is None
+        user_sessions = create_test_db.query(SessionTokenModel).all()
+        assert len(user_sessions) == 0
 
 
     def test_logout_all_revokes_all_sessions_for_user(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
         # This time, we set a refresh cookie so the endpoint can identify 
         # the user and revoke all their sessions.
+        user = refresh_token_bundle_for_test_user["user"]
+
         raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
         client.cookies.set("refresh_token", raw_refresh_token)
 
-        response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+        logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["message"] == "Logged out of all devices."
+        assert logout_response.status_code == status.HTTP_200_OK
+        assert logout_response.json()["message"] == "Logged out of all devices."
 
         # All sessions for this user should now be revoked.
         user_sessions = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == test_user.id
+            SessionTokenModel.user_id == user.id
         ).all()
 
         assert len(user_sessions) > 0
         for s in user_sessions:
             assert s.revoked_at is not None
+
+
+    def test_logout_all_with_valid_refresh_token_but_no_session(self, client, create_test_db):
+        # Create a valid refresh token for a fake user. 
+        # Do not insert a session row.
+        raw_refresh_token = create_refresh_token(
+            user_id = str(uuid.uuid4()),
+            email_verified = True,
+            refresh_token_id = str(uuid.uuid4())
+        )
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+
+        assert logout_response.status_code == status.HTTP_200_OK
+        assert logout_response.json()["message"] == "Logged out of all devices."
+
+        # No session row should exist for this hash.
+        refresh_token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+
+        assert session_token is None
+
+
+    def test_logout_all_revocation_commit_failure(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        refresh_token_hash = refresh_token_bundle_for_test_user["hashed"]
+
+        # Force commit to fail.
+        def fail_commit():
+            raise Exception("DB failure")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+        logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
+
+        assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert logout_response.json()["detail"] == "Could not revoke all session tokens."
+
+        # Ensure no session was revoked.
+        create_test_db.expire_all()
+        session_token = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+
+        assert session_token is not None
+        assert session_token.revoked_at is None
 
 
 # ---------------------------------------------------------
@@ -801,17 +2259,18 @@ class TestAuthActiveSessions:
     def test_active_sessions_returns_all_sessions_sorted(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # The user already has one session from the fixture. Create a second one
         # manually to make sure sorting works.
         now = datetime.now(timezone.utc)
         later = now + timedelta(minutes = 5)
 
         second_session = SessionTokenModel(
-            user_id = test_user.id,
+            user_id = user.id,
             refresh_token_hash = "fake_refresh_token_hash",
             refresh_token_id = uuid.uuid4(),
             created_at = later,
@@ -833,12 +2292,12 @@ class TestAuthActiveSessions:
         #      that we have already set an access token (otherwise, it will return an 
         #      exception). Doing this authenticates the user.
         #   3. get_active_sessions executes.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
-        response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+        action_sessions_response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
+        assert action_sessions_response.status_code == status.HTTP_200_OK
 
-        sessions = response.json()["sessions"]
+        sessions = action_sessions_response.json()["sessions"]
         assert len(sessions) == 2
 
         # Sessions should be sorted by created_at descending.
@@ -849,9 +2308,9 @@ class TestAuthActiveSessions:
         self,
         client
     ):
-        response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
+        active_sessions_response = client.get(AUTH_ACTIVE_SESSIONS_PREFIX)
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert active_sessions_response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 # ---------------------------------------------------------
@@ -863,70 +2322,126 @@ class TestAuthTerminateSession:
     def test_terminate_session_successfully_revokes_session(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Authenticate the user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
         # Get the test user's existing session (which we get from a fixture).
         session_token = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == test_user.id
+            SessionTokenModel.user_id == user.id
         ).first()
 
-        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+        )
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["message"] == "Session terminated successfully."
+        assert terminate_session_response.status_code == status.HTTP_200_OK
+        assert terminate_session_response.json()["message"] == "Session terminated successfully."
 
-        # The session should now be revoked.
-        updated = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.id == session_token.id
-        ).first()
+        # The session should now be revoked. Grab the updated row from the DB. Otherwise, 
+        # we may have a stale session_token.
+        create_test_db.refresh(session_token)
 
-        assert updated.revoked_at is not None
+        assert session_token.revoked_at is not None
 
 
     def test_terminate_session_already_revoked(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Authenticate the user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
         # Revoke the session manually.
         session_token = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == test_user.id
+            SessionTokenModel.user_id == user.id
         ).first()
         session_token.revoked_at = datetime.now(timezone.utc)
         create_test_db.commit()
 
-        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+        )
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["message"] == "Session already terminated."
+        assert terminate_session_response.status_code == status.HTTP_200_OK
+        assert terminate_session_response.json()["message"] == "Session already terminated."
 
 
     def test_terminate_session_not_found(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Authenticate the user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
         # Use a random UUID that does not exist in the database.
         random_id = uuid.uuid4()
 
-        response = client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{random_id}")
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{random_id}")
+        )
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert response.json()["detail"] == "Session not found."
+        assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
+        assert terminate_session_response.json()["detail"] == "Session not found."
+
+
+    def test_terminate_session_commit_failure(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+
+        # Authenticate the user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Get the user's session.
+        session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id
+        ).first()
+
+        # Force commit to fail.
+        def fail_commit():
+            raise Exception("DB failure")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{session_token.id}")
+        )
+
+        assert terminate_session_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert terminate_session_response.json()["detail"] == "Failed to terminate session."
+
+        # Ensure the session was not revoked.
+        create_test_db.expire_all()
+        session_token_after_terminate = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.id == session_token.id
+        ).first()
+
+        assert session_token_after_terminate.revoked_at is None
+
+
+    def test_terminate_session_requires_authentication(self, client):
+
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{uuid.uuid4()}")
+        )
+
+        assert terminate_session_response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 # ---------------------------------------------------------
@@ -936,91 +2451,259 @@ class TestAuthTerminateSession:
 class TestAuthRefresh:
 
     def test_refresh_issues_new_access_token(
-        self, 
-        client, 
-        test_user, 
-        refresh_token_bundle_for_test_user
-    ):
-        client.cookies.set("refresh_token", refresh_token_bundle_for_test_user["raw"])
-        response = client.post(AUTH_REFRESH_PREFIX)
-
-        assert response.status_code == status.HTTP_200_OK
-
-        set_cookie_header = response.headers.get("set-cookie")
-        assert "access_token=" in set_cookie_header
-
-
-    def test_refresh_rotates_refresh_token(
-        self, 
-        client,
-        test_user,
-        refresh_token_bundle_for_test_user
-    ):
-        old_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
-
-        client.cookies.set("refresh_token", old_raw_refresh_token)
-        response = client.post(AUTH_REFRESH_PREFIX)
-
-        assert response.status_code == status.HTTP_200_OK
-
-        # The refresh endpoint should set a new refresh token cookie.
-        set_cookie_header = response.headers.get("set-cookie")
-
-        # Parse out the new token
-        new_refresh_token = set_cookie_header.split("refresh_token=")[1].split(";")[0]
-
-        assert set_cookie_header is not None
-        assert "refresh_token=" in set_cookie_header
-        # Ensure the new token is different from the old one.
-        assert new_refresh_token != old_raw_refresh_token
-
-    def test_refresh_detects_token_reuse(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
-        # As a reminder, token reuse just means that a different refresh token than the one 
-        # original associated with the session is being used. 
-        # 
-        
-        # First, we call the refresh endpoint with our original test token in order to rotate it.
+        user = refresh_token_bundle_for_test_user["user"]
         original_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
 
         client.cookies.set("refresh_token", original_raw_refresh_token)
-        first_response = client.post(AUTH_REFRESH_PREFIX)
 
-        assert first_response.status_code == status.HTTP_200_OK
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
-        # Extract the new refresh token from Set-Cookie. It should be different than the original
-        # if the refresh endpoint rotated it properly.
-        set_cookie_headers = first_response.headers.get_list("set-cookie")
-        new_refresh_cookie = next(h for h in set_cookie_headers if "refresh_token=" in h)
-        new_raw_refresh_token = new_refresh_cookie.split("refresh_token=")[1].split(";")[0]
+        assert refresh_response.status_code == status.HTTP_200_OK
 
-        assert new_raw_refresh_token != original_raw_refresh_token
+        # We should have a new access token.
+        body = refresh_response.json()
+        assert "access_token" in body
 
-        # Call the refresh endpoint again using the same original refresh token to trigger 
-        # reuse detection. We need to clear the cookies first so starlette doesn't merge them or
-        # leave behind anything from the first send.
+        # The new access token should differ from the old one.
+        # The fixture does not expose the old access token, but we can assert
+        # that the new one is structurally valid and non-empty.
+        new_access_token = body["access_token"]
+        assert isinstance(new_access_token, str)
+        assert len(new_access_token) > 10  
+
+        # There should be a new session token in the DB
+        session_tokens = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id
+        ).all()
+
+        # There should be exactly two tokens, the original (now revoked) one,
+        # and a newly created one.
+        assert len(session_tokens) == 2
+
+        revoked_sessions = [s for s in session_tokens if s.revoked_at is not None]
+        live_sessions = [s for s in session_tokens if s.revoked_at is None]
+
+        assert len(revoked_sessions) == 1
+        assert len(live_sessions) == 1
+
+        # The live token should correspond to the new access token.
+        assert live_sessions[0].refresh_token_hash is not None
+
+
+    def test_refresh_rotates_refresh_token(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+        old_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        old_hashed_refresh_token = refresh_token_bundle_for_test_user["hashed"]
+
+        client.cookies.set("refresh_token", old_raw_refresh_token)
+
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert refresh_response.status_code == status.HTTP_200_OK
+
+        # Extract the new refresh token from the cookie header. It should be
+        # different from the original one.
+        set_cookie_header = refresh_response.headers.get("set-cookie")
+        assert set_cookie_header is not None
+        assert "refresh_token=" in set_cookie_header
+
+        new_raw_refresh_token = set_cookie_header.split("refresh_token=")[1].split(";")[0]
+        assert new_raw_refresh_token != old_raw_refresh_token
+
+        # The DB should reflect the rotation.
+        session_tokens = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id
+        ).all()
+
+        # There should be exactly two tokens, the original (now revoked) one,
+        # and a newly created one.
+        assert len(session_tokens) == 2
+
+        revoked_sessions = ([
+            s for s in session_tokens 
+            if s.refresh_token_hash == old_hashed_refresh_token
+        ])
+        live_sessions = ([
+            s for s in session_tokens 
+            if s.refresh_token_hash != old_hashed_refresh_token
+        ])
+
+        assert len(revoked_sessions) == 1
+        assert revoked_sessions[0].revoked_at is not None
+
+        assert len(live_sessions) == 1
+        assert live_sessions[0].revoked_at is None
+
+        # The live token's hash must match the new cookie value.
+        expected_hash = hashlib.sha256(new_raw_refresh_token.encode()).hexdigest()
+        assert live_sessions[0].refresh_token_hash == expected_hash
+
+
+    def test_refresh_replay_within_grace_window_is_treated_as_benign(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # An initial call to refresh should be successful.
+        user = refresh_token_bundle_for_test_user["user"]
+        original_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        client.cookies.set("refresh_token", original_raw_refresh_token)
+
+        # This should revoke one session and create a new one with a new
+        # refresh token id and hash, as well as revoked_at of None.
+        first_refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert first_refresh_response.status_code == status.HTTP_200_OK
+
+        # Immediately replay the now-rotated original token, well within
+        # CONCURRENT_REFRESH_GRACE_SECONDS. This should be treated as benign
+        # concurrency, not reuse. No account-wide revocation, but the refresh
+        # should fail. We should have the same two tokens as we did immediately
+        # after the first refresh.
         client.cookies.clear()
         client.cookies.set("refresh_token", original_raw_refresh_token)
-        second_response = client.post(AUTH_REFRESH_PREFIX)
 
-        # The endpoint should revoke all sessions for our test user.
-        assert second_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert second_response.json()["detail"] == (
+        second_refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert second_refresh_response.json()["detail"] == "Refresh token expired or stale."
+
+        # Only the originally rotated session should be revoked still.
+        session_tokens = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id
+        ).all()
+
+        unrevoked_tokens = [s for s in session_tokens if s.revoked_at is None]
+        assert len(unrevoked_tokens) == 1 
+
+
+    def test_refresh_replay_outside_grace_window_is_treated_as_reuse(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        # An initial call to refresh should be successful.
+        user = refresh_token_bundle_for_test_user["user"]
+        original_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        original_hashed_token = refresh_token_bundle_for_test_user["hashed"]
+
+        client.cookies.set("refresh_token", original_raw_refresh_token)
+
+        # This should revoke one session and create a new one with a new
+        # refresh token id and hash, as well as revoked_at of None.
+        first_refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert first_refresh_response.status_code == status.HTTP_200_OK
+
+        # Backdate the original (now rotated) session token's revoked_at so it
+        # falls outside CONCURRENT_REFRESH_GRACE_SECONDS. This simulates a
+        # genuinely stale/stolen token being replayed well after rotation,
+        # without needing the test to actually sleep. The refresh should fail.
+        rotated_session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.refresh_token_hash == original_hashed_token
+        ).first()
+
+        rotated_session_token.revoked_at = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds = CONCURRENT_REFRESH_GRACE_SECONDS + 1)
+        )
+        create_test_db.commit()
+
+        client.cookies.clear()
+        client.cookies.set("refresh_token", original_raw_refresh_token)
+
+        second_refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert second_refresh_response.json()["detail"] == (
             "Refresh token reuse detected. All sessions revoked."
         )
 
-        user_sessions = create_test_db.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == test_user.id
+        # All sessions should be revoked to protect against malicious 
+        # attacks.
+        session_tokens = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id
         ).all()
 
-        assert len(user_sessions) > 0
-        for s in user_sessions:
+        assert len(session_tokens) > 0
+        for s in session_tokens:
             assert s.revoked_at is not None
+
+
+    def test_refresh_missing_cookie_returns_401(self, client):
+        # Do not set a refresh token cookie.
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert refresh_response.json()["detail"] == "Missing refresh token."
+
+
+    def test_refresh_invalid_refresh_token_returns_401(self, client, create_test_db):
+        # Set a refresh token cookie that does not correspond to any session.
+        client.cookies.set("refresh_token", "fakeToken")
+
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert refresh_response.json()["detail"] == "Invalid refresh token."
+
+
+    def test_refresh_expired_refresh_token_returns_401(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        refresh_token_hash = refresh_token_bundle_for_test_user["hashed"]
+
+        # Expire the session token manually.
+        session_token = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.refresh_token_hash == refresh_token_hash
+        ).first()
+
+        session_token.expires_at = datetime.now(timezone.utc) - timedelta(days = 1)
+        create_test_db.commit()
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert refresh_response.json()["detail"] == "Refresh token expired."
+
+
+    def test_refresh_atomic_update_fails_returns_401(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+
+        client.cookies.set("refresh_token", raw_refresh_token)
+
+        # Monkeypatch Query.update to simulate atomic update failure.
+        monkeypatch.setattr(Query, "update", lambda *args, **kwargs: 0)
+
+        refresh_response = client.post(AUTH_REFRESH_PREFIX)
+
+        assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert refresh_response.json()["detail"] == "Refresh token expired."
+
 
 # ---------------------------------------------------------
 # ME
@@ -1031,18 +2714,20 @@ class TestAuthMe:
     def test_me_returns_user_details(
         self, 
         client, 
-        test_user, 
         access_token_for_test_user
     ):
-        client.cookies.set("access_token", access_token_for_test_user)
-        response = client.get(AUTH_ME_PREFIX)
+        user = access_token_for_test_user["user"]
+        access_token = access_token_for_test_user["access_token"]
 
-        data = response.json()
+        client.cookies.set("access_token", access_token)
+        me_response = client.get(AUTH_ME_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
-        assert data["id"] == str(test_user.id)
-        assert data["email"] == test_user.email
-        assert data["created_at"] != ""
+        me_data = me_response.json()
+
+        assert me_response.status_code == status.HTTP_200_OK
+        assert me_data["id"] == str(user.id)
+        assert me_data["email"] == user.email
+        assert me_data["created_at"] != ""
 
 
 # ---------------------------------------------------------
@@ -1054,34 +2739,35 @@ class TestAuthExportUserData:
     def test_export_user_data_success(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Simulate a fresh login by setting last_login to now. Recall that the
         # endpoint requires the user to have logged in within the last 5 minutes.
-        test_user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(timezone.utc)
         create_test_db.commit()
 
         # Authenticate the user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+        export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
+        assert export_user_data_response.status_code == status.HTTP_200_OK
 
         # The response body should be gzip-compressed bytes.
-        decompressed = gzip.decompress(response.content)
+        decompressed = gzip.decompress(export_user_data_response.content)
         data = json.loads(decompressed)
 
         # Verify that one of the expected fields is in the file. The user id should be
         # that of our test user.
         assert isinstance(data, dict)
         assert "user" in data  
-        assert data["user"]["id"] == str(test_user.id)
+        assert data["user"]["id"] == str(user.id)
 
         # Verify that a DSAR log was created and fulfilled.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].request_type == DSAR_REQUEST_EXPORT_USER_DATA
@@ -1092,30 +2778,35 @@ class TestAuthExportUserData:
     def test_export_user_data_fails_if_no_access_token(
         self,
         client,
-        test_user,
+        create_test_user,
         create_test_db
     ):
-        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+        user = create_test_user()
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        assert export_user_data_response.status_code == status.HTTP_401_UNAUTHORIZED
 
         # No DSAR log should be created.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(
+            user_id = user.id
+        ).all()
         assert dsar_logs == []
 
 
     def test_export_user_data_marks_dsar_failed_on_exception(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db,
         monkeypatch
     ):
-        test_user.last_login = datetime.now(timezone.utc)
+        user = refresh_token_bundle_for_test_user["user"]
+
+        user.last_login = datetime.now(timezone.utc)
         create_test_db.commit()
 
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
         # ⭐ NEW — force service to throw
         def export_user_data_exception(*args, **kwargs):
@@ -1127,12 +2818,12 @@ class TestAuthExportUserData:
             export_user_data_exception
         )
 
-        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+        export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert export_user_data_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
         # Verify DSAR log marked FAILED.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
@@ -1143,42 +2834,43 @@ class TestAuthExportUserData:
     def test_export_user_data_requires_fresh_login(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Set last_login far in the past.
-        test_user.last_login = datetime.now(timezone.utc) - timedelta(days = 30)
+        user.last_login = datetime.now(timezone.utc) - timedelta(days = 30)
         create_test_db.commit()
 
         # Authenticate user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+        export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert "log in again" in response.json()["detail"]
+        assert export_user_data_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert "log in again" in export_user_data_response.json()["detail"]
 
 
     def test_export_user_data_returns_valid_gzip(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db
     ):
+        user = refresh_token_bundle_for_test_user["user"]
 
-        test_user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(timezone.utc)
         create_test_db.commit()
 
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+        export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_200_OK
+        assert export_user_data_response.status_code == status.HTTP_200_OK
 
         # Validate gzip header (first two bytes should be 0x1f, 0x8b)
-        compressed = response.content
+        compressed = export_user_data_response.content
         assert compressed[:2] == b"\x1f\x8b"
 
         # We should be able to load the decompressed file without an error.
@@ -1195,40 +2887,42 @@ class TestAuthDeleteUserData:
     def test_delete_user_data_success(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db,
         user_tea_profile_notes_repo,
         empty_user_tea_profile_notes_inbound,
+        long_jing_tea_profile_id
     ):
+        user = refresh_token_bundle_for_test_user["user"]
+
         # Simulate a fresh login.
-        test_user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(timezone.utc)
         create_test_db.commit()
 
         # Create some user-generated data.
         user_tea_profile_notes_repo.create(
-            user_id = test_user.id,
-            tea_profile_id = 99,
+            user_id = user.id,
+            tea_profile_id = long_jing_tea_profile_id,
             inbound_schema = empty_user_tea_profile_notes_inbound
         )
 
         # Authenticate the user.
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+        delete_user_data_response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert delete_user_data_response.status_code == status.HTTP_204_NO_CONTENT
 
         # Verify that user-generated data was deleted.
-        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(test_user.id)
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user.id)
         assert user_tea_profile_notes == []
 
         # Verify the user account still exists.
-        user = create_test_db.get(UserInternalModel, test_user.id)
+        user = create_test_db.get(UserInternalModel, user.id)
         assert user is not None
 
         # Verify that a DSAR log was created and fulfilled.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].request_type == DSAR_REQUEST_DELETE_USER_DATA
@@ -1239,38 +2933,42 @@ class TestAuthDeleteUserData:
     def test_delete_user_data_fails_if_no_access_token(
         self, 
         client,
-        test_user,
+        create_test_user,
         create_test_db
     ):
-        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+        user = create_test_user()
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        delete_user_data_response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+
+        assert delete_user_data_response.status_code == status.HTTP_401_UNAUTHORIZED
 
         # No DSAR log should be created.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
         assert dsar_logs == []
 
 
     def test_delete_user_data_marks_dsar_failed_on_exception(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db,
         user_tea_profile_notes_repo,
         empty_user_tea_profile_notes_inbound,
+        long_jing_tea_profile_id,
         monkeypatch
     ):
-        test_user.last_login = datetime.now(timezone.utc)
-        create_test_db.commit()
+        user = refresh_token_bundle_for_test_user["user"]
+
+        user.last_login = datetime.now(timezone.utc)
 
         user_tea_profile_notes_repo.create(
-            user_id = test_user.id,
-            tea_profile_id = 99,
+            user_id = user.id,
+            tea_profile_id = long_jing_tea_profile_id,
             inbound_schema = empty_user_tea_profile_notes_inbound
         )
+        create_test_db.commit() 
 
-        client.cookies.set("access_token", create_access_token(str(test_user.id), True))
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
         def delete_user_data_exception(*args, **kwargs):
             raise Exception("Failed to delete user data.")
@@ -1281,12 +2979,12 @@ class TestAuthDeleteUserData:
             delete_user_data_exception
         )
 
-        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+        delete_user_data_response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
 
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert delete_user_data_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
         # Verify DSAR log marked FAILED.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
@@ -1294,7 +2992,7 @@ class TestAuthDeleteUserData:
         assert dsar_logs[0].fulfilled_at is not None
 
         # Verify that user-generated data was not deleted.
-        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(test_user.id)
+        user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user.id)
         assert user_tea_profile_notes != []
 
 
@@ -1307,31 +3005,32 @@ class TestAuthDeleteUserAccount:
     def test_delete_user_account_success(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db,
         user_tea_profile_notes_repo,
+        long_jing_tea_profile_id,
         empty_user_tea_profile_notes_inbound,
     ):
-        user_id = test_user.id
+        user = refresh_token_bundle_for_test_user["user"]
+        user_id = user.id
 
         # Simulate a fresh login.
-        test_user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(timezone.utc)
         create_test_db.commit()
 
         # Create some user-generated data.
         user_tea_profile_notes_repo.create(
             user_id = user_id,
-            tea_profile_id = 99,
+            tea_profile_id = long_jing_tea_profile_id,
             inbound_schema = empty_user_tea_profile_notes_inbound
         )
 
         # Authenticate the user.
         client.cookies.set("access_token", create_access_token(str(user_id), True))
 
-        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+        delete_user_account_response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
 
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert delete_user_account_response.status_code == status.HTTP_204_NO_CONTENT
 
         # Verify user-generated data was deleted.
         user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user_id)
@@ -1341,49 +3040,49 @@ class TestAuthDeleteUserAccount:
         user = create_test_db.get(UserInternalModel, user_id)
         assert user is None
 
-        # Verify that a DSAR log was created and fulfilled.
+        # There should be no dsar logs, since they cascade on delete with the user_id.
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
-
-        assert len(dsar_logs) == 1
-        assert dsar_logs[0].request_type == DSAR_REQUEST_DELETE_USER_ACCOUNT
-        assert dsar_logs[0].status == DSAR_STATUS_FULFILLED
-        assert dsar_logs[0].fulfilled_at is not None
+        assert len(dsar_logs) == 0
 
 
     def test_delete_user_account_fails_if_no_access_token(
         self, 
         client,
-        test_user,
+        create_test_user,
         create_test_db
     ):
-        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+        user = create_test_user()
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        delete_user_account_response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert delete_user_account_response.status_code == status.HTTP_401_UNAUTHORIZED
 
         # No DSAR log should be created.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = test_user.id).all()
+        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
         assert dsar_logs == []
 
 
     def test_delete_user_account_marks_dsar_failed_on_exception(
         self,
         client,
-        test_user,
         refresh_token_bundle_for_test_user,
         create_test_db,
         user_tea_profile_notes_repo,
         empty_user_tea_profile_notes_inbound,
+        long_jing_tea_profile_id,
         monkeypatch
     ):
-        user_id = test_user.id
+        user = refresh_token_bundle_for_test_user["user"]
+        user_id = user.id
 
-        test_user.last_login = datetime.now(timezone.utc)
-        create_test_db.commit()
+        user.last_login = datetime.now(timezone.utc)
+        
         user_tea_profile_notes_repo.create(
             user_id = user_id,
-            tea_profile_id = 99,
+            tea_profile_id = long_jing_tea_profile_id,
             inbound_schema = empty_user_tea_profile_notes_inbound
         )
+        create_test_db.commit()
 
         client.cookies.set("access_token", create_access_token(str(user_id), True))
 
@@ -1396,9 +3095,9 @@ class TestAuthDeleteUserAccount:
             delete_user_account_exception
         )
 
-        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+        delete_user_account_response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
 
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert delete_user_account_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
         # Verify DSAR log marked FAILED.
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
