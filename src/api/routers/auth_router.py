@@ -11,10 +11,95 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import json
 import gzip
 
+
+# Constants
+
+from src.constants.jwt_constants import (
+    ACCESS_TOKEN_LIFETIME_MINUTES,
+    REFRESH_TOKEN_LIFETIME_DAYS
+)
+from src.constants.cookie_constants import SAME_SITE_VALUE
+from src.constants.route_constants import (
+    AUTH,
+    AUTH_PREFIX,
+    SIGNUP,
+    VERIFY_EMAIL,
+    SEND_VERIFICATION,
+    REQUEST_PASSWORD_RESET,
+    RESET_PASSWORD,
+    LOGIN,
+    LOGOUT,
+    LOGOUT_ALL,
+    ACTIVE_SESSIONS,
+    TERMINATE_SESSION,
+    REFRESH,
+    ME,
+    EXPORT_USER_DATA,
+    DELETE_USER_DATA,
+    DELETE_USER_ACCOUNT,
+    CONFIRM_PASSWORD,
+)
+from src.constants.dsar_constants import (
+    DSAR_REQUEST_DELETE_USER_ACCOUNT,
+    DSAR_REQUEST_DELETE_USER_DATA,
+    DSAR_REQUEST_EXPORT_USER_DATA
+)
+from src.constants.token_constants import (
+    EMAIL_VERIFICATION,
+    PASSWORD_RESET
+)
+from src.constants.auth_constants import (
+    FRESH_LOGIN_WINDOW_SECONDS,
+    CONCURRENT_REFRESH_GRACE_SECONDS
+)
+
+
+# Config and setup
+
+from src.core.rate_limit.setup_rate_limit import rate_limiter
+from src.core.rate_limit.config_rate_limit import (
+    LOW_RATE_LIMIT,
+    VERY_LOW_RATE_LIMIT,
+    LOWEST_RATE_LIMIT
+)
+
+
+# Dependencies
+
+from src.api.dependencies.auth_dependencies import get_current_user
+
+
+# Utilities
+
 from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.session_utils import get_session
+from src.utils.auth.password_utils import (
+    hash_password, 
+    validate_password_strength,
+    verify_password
+)
+from src.utils.auth.jwt_utils import (
+    create_access_token
+)
+from src.utils.auth.token_utils import (
+    create_raw_verification_token,
+    send_verification_email,
+    send_password_reset_email
+)
+from src.utils.request_metadata_utils import (
+    get_client_ip,
+    get_user_agent
+)
+from src.utils.auth.cookie_utils import delete_auth_token_cookies
+
+# Models
+
 from src.db.models.auth.user_models import UserInternalModel
 from src.db.models.auth.session_token_model import SessionTokenModel
+from src.db.models.auth.verification_token_model import VerificationTokenModel
+
+# Schema
+
 from src.api.schemas.auth.user_schema import (
     UserInboundSchema,
     UserOutboundSchema,
@@ -44,76 +129,23 @@ from src.api.schemas.auth.email_verification_schema import (
 )
 from src.api.schemas.auth.refresh_schema import RefreshResponseSchema
 from src.api.schemas.auth.me_schema import MeResponseSchema
-from src.api.dependencies.auth_dependencies import get_current_user
-from src.utils.auth.password_utils import (
-    hash_password, 
-    validate_password_strength,
-    verify_password
-)
-from src.constants.jwt_constants import (
-    ACCESS_TOKEN_LIFETIME_MINUTES,
-    REFRESH_TOKEN_LIFETIME_DAYS
-)
-from src.constants.cookie_constants import SAME_SITE_VALUE
-from src.utils.auth.jwt_utils import (
-    create_access_token
-)
-from src.core.rate_limit.setup_rate_limit import rate_limiter
-from src.core.rate_limit.config_rate_limit import (
-    LOW_RATE_LIMIT,
-    VERY_LOW_RATE_LIMIT,
-    LOWEST_RATE_LIMIT
-)
-from src.constants.route_constants import (
-    AUTH,
-    AUTH_PREFIX,
-    SIGNUP,
-    VERIFY_EMAIL,
-    SEND_VERIFICATION,
-    REQUEST_PASSWORD_RESET,
-    RESET_PASSWORD,
-    LOGIN,
-    LOGOUT,
-    LOGOUT_ALL,
-    ACTIVE_SESSIONS,
-    TERMINATE_SESSION,
-    REFRESH,
-    ME,
-    EXPORT_USER_DATA,
-    DELETE_USER_DATA,
-    DELETE_USER_ACCOUNT,
-)
-from src.constants.dsar_constants import (
-    DSAR_REQUEST_DELETE_USER_ACCOUNT,
-    DSAR_REQUEST_DELETE_USER_DATA,
-    DSAR_REQUEST_EXPORT_USER_DATA
-)
-from src.utils.auth.token_utils import (
-    create_raw_verification_token,
-    send_verification_email,
-    send_password_reset_email
-)
-from src.constants.token_constants import (
-    EMAIL_VERIFICATION,
-    PASSWORD_RESET
-)
-from src.db.models.auth.verification_token_model import VerificationTokenModel
-from src.utils.request_metadata_utils import (
-    get_client_ip,
-    get_user_agent
-)
-from src.utils.auth.cookie_utils import delete_auth_token_cookies
+from src.api.schemas.auth.confirm_password_schema import ConfirmPasswordInboundSchema
+
+
+# Services
+
 from src.app.services.user_data_export_services import UserDataExportService
 from src.app.services.user_data_deletion_services import (
     UserDataDeletionService,
     UserAccountDeletionService
 )
+
+
+# Repositories
 from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
 from src.db.repositories.dsar_log_repository import DSARLogRepository
-from src.constants.auth_constants import (
-    FRESH_LOGIN_WINDOW_SECONDS,
-    CONCURRENT_REFRESH_GRACE_SECONDS
-)
+from src.db.repositories.password_confirmation_repository import PasswordConfirmationRepository
+
 
 # Define group of routes with auth as their base path for documentation grouping.
 router = APIRouter(prefix = AUTH_PREFIX, tags = ["auth"])
@@ -903,11 +935,18 @@ def logout(
                     session.rollback()
 
                     sentry_sdk.capture_exception(exc)
-                    
-                    raise HTTPException(
+
+                    error_response = JSONResponse(
                         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail = "Could not revoke session token."
-                    ) from exc
+                        content = {"detail": "Could not revoke session token."}
+                    )
+                    # Preserve Cache-Control and the cookie-deletion headers already set on
+                    # the injected response object. Raising HTTPException here would
+                    # otherwise discard them, since FastAPI's default exception handler
+                    # builds an entirely new Response that never sees them.
+                    error_response.raw_headers.extend(response.raw_headers)
+
+                    return error_response                    
 
         return LogoutResponseSchema(message = "Logged out")
 
@@ -1579,6 +1618,14 @@ def delete_user_account(
 
         _require_fresh_login(current_user)
 
+        # Require recent password confirmation.
+        password_confirmation_repo = PasswordConfirmationRepository(session)
+        if not password_confirmation_repo.is_confirmation_valid(current_user.id):
+            raise HTTPException(
+                status_code = status.HTTP_403_FORBIDDEN,
+                detail = "Password confirmation required."
+            )
+
         # Instantiate repos.
         user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
         dsar_log_repo = DSARLogRepository(session)
@@ -1622,3 +1669,49 @@ def delete_user_account(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail = "Failed to delete user account.",
             )
+
+# Postman test steps for confirming password:
+#
+#     1. Follow the steps for testing login. You may want to make a new user for this.
+#
+#     2. Call confirm_password as "POST /auth/confirm_password" with JSON:
+#        { "password": "<user's password>" }
+#
+@router.post(
+    f"/{CONFIRM_PASSWORD}",
+    status_code = status.HTTP_204_NO_CONTENT,
+    summary = "Confirm password for high-risk actions",
+    description = (
+        "Verifies the user's password and records a short-lived confirmation "
+        "allowing high-risk actions such as account deletion."
+    )
+)
+@rate_limiter.limit(LOWEST_RATE_LIMIT)
+def confirm_password(
+    request: Request,
+    payload: ConfirmPasswordInboundSchema,
+    current_user: UserInternalModel = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    with sentry_sdk.start_span(op = AUTH, name = "confirm_password"):
+        sentry_sdk.set_tag("endpoint", "confirm_password")
+
+        _require_fresh_login(current_user)
+
+        # Validate password.
+        if not verify_password(payload.password, current_user.hashed_password):
+            raise HTTPException(
+                status_code = status.HTTP_401_UNAUTHORIZED,
+                detail = "Invalid password."
+            )
+
+        # Instantiate repo.
+        password_confirmation_repo = PasswordConfirmationRepository(session)
+
+        # Create confirmation entry.
+        password_confirmation_repo.create_confirmation(user_id = current_user.id)
+
+        # Commit immediately so confirmation is durable.
+        session.commit()
+
+        return Response(status_code = status.HTTP_204_NO_CONTENT)
