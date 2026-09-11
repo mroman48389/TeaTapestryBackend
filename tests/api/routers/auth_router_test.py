@@ -2637,8 +2637,8 @@ class TestAuthTerminateSession:
         ).first()
 
         # Force commit to fail.
-        def fail_commit():
-            raise Exception("DB failure")
+        def fail_commit(self, *args, **kwargs):
+            raise Exception("Commit failure.")
 
         monkeypatch.setattr(Session, "commit", fail_commit)
 
@@ -2666,6 +2666,55 @@ class TestAuthTerminateSession:
 
         assert terminate_session_response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    def test_terminate_session_belonging_to_another_user_returns_not_found(
+        self, 
+        client, 
+        refresh_token_bundle_for_test_user, 
+        create_test_db
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+
+        # Set the access token for our test user but not for a secondary, other user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Create and add another user with accompanying session.
+        other_user = UserInternalModel(
+            email = "otherUser@somedomain.com",
+            hashed_password = hash_password("OtherPassword@123"),
+            display_name = "Other User",
+            is_verified = True
+        )
+        create_test_db.add(other_user)
+        create_test_db.commit()
+
+        other_session = SessionTokenModel(
+            user_id = other_user.id, 
+            refresh_token_hash = "other_hash", 
+            refresh_token_id = uuid.uuid4(),
+            created_at = datetime.now(timezone.utc), 
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+            user_agent = "other-agent", 
+            ip_address = "10.0.0.1"
+        )
+        create_test_db.add(other_session)
+        create_test_db.commit()
+
+        # Try to terminate the other user's session.
+        terminate_session_response = (
+            client.post(f"{AUTH_TERMINATE_SESSION_PREFIX}/{other_session.id}")
+        )
+
+        # It should fail, since we did not set an access token.
+        assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
+        assert terminate_session_response.json()["detail"] == "Session not found."
+
+        create_test_db.expire_all()
+
+        # Make sure the other user's session still exists.
+        other_session_after_terminate = create_test_db.query(SessionTokenModel).filter_by(
+            id = other_session.id
+        ).first()
+        assert other_session_after_terminate.revoked_at is None
 
 # ---------------------------------------------------------
 # REFRESH
@@ -2781,6 +2830,7 @@ class TestAuthRefresh:
         # An initial call to refresh should be successful.
         user = refresh_token_bundle_for_test_user["user"]
         original_raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+
         client.cookies.set("refresh_token", original_raw_refresh_token)
 
         # This should revoke one session and create a new one with a new
@@ -2788,6 +2838,13 @@ class TestAuthRefresh:
         first_refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert first_refresh_response.status_code == status.HTTP_200_OK
+
+        # Save the revoked_at timestamp for the original session.
+        rotated_session = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user.id,
+            SessionTokenModel.revoked_at.isnot(None)
+        ).first()
+        original_revoked_at = rotated_session.revoked_at
 
         # Immediately replay the now-rotated original token, well within
         # CONCURRENT_REFRESH_GRACE_SECONDS. This should be treated as benign
@@ -2802,20 +2859,30 @@ class TestAuthRefresh:
         assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert second_refresh_response.json()["detail"] == "Refresh token expired or stale."
 
-        # Only the originally rotated session should be revoked still.
+        # We should have one removked token from the first refresh + one new sesion token.
+        # The benign replay (second call to refresh) should produce no more tokens.
         session_tokens = create_test_db.query(SessionTokenModel).filter(
             SessionTokenModel.user_id == user.id
         ).all()
+        assert len(session_tokens) == 2
 
         unrevoked_tokens = [s for s in session_tokens if s.revoked_at is None]
         assert len(unrevoked_tokens) == 1 
+
+        # The revoked_at timestamp should not have changed if we correctly identified the 
+        # benign replay.
+        revoked_tokens = [
+            s for s in session_tokens if s.revoked_at is not None
+        ][0]
+        assert revoked_tokens.revoked_at == original_revoked_at
 
 
     def test_refresh_replay_outside_grace_window_is_treated_as_reuse(
         self,
         client,
         refresh_token_bundle_for_test_user,
-        create_test_db
+        create_test_db,
+        create_test_user,
     ):
         # An initial call to refresh should be successful.
         user = refresh_token_bundle_for_test_user["user"]
@@ -2829,6 +2896,25 @@ class TestAuthRefresh:
         first_refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert first_refresh_response.status_code == status.HTTP_200_OK
+
+        # Create another user and session to ensure isolation.
+        other_user = create_test_user(
+            email = "otherUser@somedomain.com",
+            password = "OtherPassword@123",
+            display_name = "Other User",
+            is_verified = True
+        )
+
+        other_session = SessionTokenModel(
+            user_id = other_user.id,
+            refresh_token_hash = "other_hash",
+            refresh_token_id = uuid.uuid4(),
+            created_at = datetime.now(timezone.utc),
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+            revoked_at = None
+        )
+        create_test_db.add(other_session)
+        create_test_db.commit()
 
         # Backdate the original (now rotated) session token's revoked_at so it
         # falls outside CONCURRENT_REFRESH_GRACE_SECONDS. This simulates a
@@ -2854,7 +2940,7 @@ class TestAuthRefresh:
             "Refresh token reuse detected. All sessions revoked."
         )
 
-        # All sessions should be revoked to protect against malicious 
+        # All sessions for the test user should be revoked to protect against malicious 
         # attacks.
         session_tokens = create_test_db.query(SessionTokenModel).filter(
             SessionTokenModel.user_id == user.id
@@ -2863,6 +2949,12 @@ class TestAuthRefresh:
         assert len(session_tokens) > 0
         for s in session_tokens:
             assert s.revoked_at is not None
+
+        # The other user's session must remain untouched.
+        other_session_after = create_test_db.query(SessionTokenModel).filter_by(
+            id = other_session.id
+        ).first()
+        assert other_session_after.revoked_at is None
 
 
     def test_refresh_missing_cookie_returns_401(self, client):
@@ -2916,16 +3008,46 @@ class TestAuthRefresh:
         monkeypatch
     ):
         raw_refresh_token = refresh_token_bundle_for_test_user["raw"]
+        hashed_refresh_token = refresh_token_bundle_for_test_user["hashed"]
+        user_id = refresh_token_bundle_for_test_user["user"].id
 
         client.cookies.set("refresh_token", raw_refresh_token)
 
         # Monkeypatch Query.update to simulate atomic update failure.
-        monkeypatch.setattr(Query, "update", lambda *args, **kwargs: 0)
+        original_update = Query.update
+        call_count = {"n": 0}
+
+        def selective_fail_update(self, *args, **kwargs):
+            call_count["n"] += 1
+
+            # The rotation CAS is the first (and only) update call on this path
+            if call_count["n"] == 1:
+                return 0
+            
+            return original_update(self, *args, **kwargs)
+
+        monkeypatch.setattr(Query, "update", selective_fail_update)
 
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert refresh_response.json()["detail"] == "Refresh token expired."
+
+        create_test_db.expire_all()
+
+        session_token_after = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = hashed_refresh_token
+        ).first()
+
+        # The original session must still exist and not be revoked.
+        assert session_token_after is not None
+        assert session_token_after.revoked_at is None
+
+        # No new session should have been created.
+        all_sessions = create_test_db.query(SessionTokenModel).filter(
+            SessionTokenModel.user_id == user_id
+        ).all()
+        assert len(all_sessions) == 1
 
 
 # ---------------------------------------------------------
@@ -2986,8 +3108,16 @@ class TestAuthExportUserData:
         # Verify that one of the expected fields is in the file. The user id should be
         # that of our test user.
         assert isinstance(data, dict)
+
         assert "user" in data  
         assert data["user"]["id"] == str(user.id)
+
+        assert "session_tokens" in data
+        assert len(data["session_tokens"]) >= 1
+
+        assert "verification_tokens" in data
+
+        assert "user_tea_profile_notes" in data
 
         # Verify that a DSAR log was created and fulfilled.
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
@@ -3031,7 +3161,6 @@ class TestAuthExportUserData:
 
         client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        # ⭐ NEW — force service to throw
         def export_user_data_exception(*args, **kwargs):
             raise Exception("Failed to export user data.")
 
@@ -3051,7 +3180,7 @@ class TestAuthExportUserData:
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to export user data."
-        assert dsar_logs[0].fulfilled_at is not None
+        assert dsar_logs[0].fulfilled_at is None
 
 
     def test_export_user_data_requires_fresh_login(
@@ -3073,6 +3202,11 @@ class TestAuthExportUserData:
 
         assert export_user_data_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert "log in again" in export_user_data_response.json()["detail"]
+
+        # Make sure a new DSAR log was not created.
+        assert create_test_db.query(DSARLogModel).filter_by(
+            user_id = user.id
+        ).all() == []
 
 
     def test_export_user_data_returns_valid_gzip(
@@ -3099,6 +3233,55 @@ class TestAuthExportUserData:
         # We should be able to load the decompressed file without an error.
         decompressed = gzip.decompress(compressed)
         json.loads(decompressed)
+
+
+    def test_export_user_data_does_not_include_other_users_data(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_user,
+        create_test_db
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+        refresh_token_hash = refresh_token_bundle_for_test_user["hashed"]
+        user.last_login = datetime.now(timezone.utc)
+        create_test_db.commit()
+
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Create another user, session, and tea notes
+        other_user = create_test_user(
+            email = "otherUser@somedomain.com",
+            password = "OtherPassword@123",
+            display_name = "Other User",
+            is_verified = True
+        )
+
+        other_session = SessionTokenModel(
+            user_id = other_user.id,
+            refresh_token_hash = "other_hash",
+            refresh_token_id = uuid.uuid4(),
+            created_at = datetime.now(timezone.utc),
+            expires_at = datetime.now(timezone.utc) + timedelta(days = 30),
+        )
+        create_test_db.add(other_session)
+        create_test_db.commit()
+
+        export_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
+
+        decompressed = gzip.decompress(export_response.content)
+        data = json.loads(decompressed)
+
+        # The user id should not be that of the other user we created and their
+        # sessions should be different.
+        assert str(other_user.id) != data["user"]["id"]
+        assert all(s["id"] != str(other_session.id) for s in data["session_tokens"])
+
+        # Confirm the test user's session is present.
+        user_session_after_export = create_test_db.query(SessionTokenModel).filter_by(
+            refresh_token_hash = refresh_token_hash
+        ).first()
+        assert any(s["id"] == str(user_session_after_export.id) for s in data["session_tokens"])
 
 
 # ---------------------------------------------------------
@@ -3212,7 +3395,7 @@ class TestAuthDeleteUserData:
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to delete user data."
-        assert dsar_logs[0].fulfilled_at is not None
+        assert dsar_logs[0].fulfilled_at is None
 
         # Verify that user-generated data was not deleted.
         user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user.id)
@@ -3338,7 +3521,7 @@ class TestAuthDeleteUserAccount:
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
         assert dsar_logs[0].notes == "Failed to delete user account."
-        assert dsar_logs[0].fulfilled_at is not None
+        assert dsar_logs[0].fulfilled_at is None
 
         # Verify that the user account was not deleted.
         user = create_test_db.get(UserInternalModel, user_id)

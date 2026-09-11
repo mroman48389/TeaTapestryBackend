@@ -101,8 +101,7 @@ class TestDSARLogRepository:
 
         assert stored_log.status == DSAR_STATUS_FAILED
         assert stored_log.notes == "Operation failed"
-        assert stored_log.fulfilled_at is not None
-        assert stored_log.fulfilled_at > stored_log.requested_at
+        assert stored_log.fulfilled_at is None
 
 
     def test_get_logs_for_user_returns_logs_in_desc_order(self, create_test_db):

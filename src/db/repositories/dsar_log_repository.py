@@ -58,7 +58,7 @@ class DSARLogRepository:
         if log:
             log.status = DSAR_STATUS_FAILED
             log.notes = notes
-            log.fulfilled_at = datetime.now(timezone.utc)
+            log.fulfilled_at = None
 
 
     def get_logs_for_user(self, user_id: UUID) -> List[DSARLogModel]:
