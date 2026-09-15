@@ -49,6 +49,7 @@ from src.constants.token_constants import (
     EMAIL_VERIFICATION,
     PASSWORD_RESET,
 )
+from src.api.constants.auth_response_messages import AuthResponseMessages
 from src.constants.jwt_constants import REFRESH_TOKEN_LIFETIME_DAYS
 from src.constants.cookie_constants import SAME_SITE_VALUE
 from src.utils.auth.jwt_utils import (
@@ -61,6 +62,7 @@ from tests.utils.test_utils import (
 from src.utils.auth.jwt_utils import create_refresh_token
 from src.api.routers.auth_router import DUMMY_PASSWORD_HASH
 from src.api.routers.auth_router import verify_password as original_verify_password
+from src.utils.time_utils import is_in_future, is_in_past
 
 # ---------------------------------------------------------
 # SIGNUP
@@ -118,15 +120,13 @@ class TestAuthSignup:
         assert verification_token.purpose == EMAIL_VERIFICATION
         assert verification_token.used is False
 
-        now = datetime.now(timezone.utc)
-        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verification_token.expires_at)
 
 
     # Note that we need the create_test_db fixture even though we're not using it in 
     # the body of the test because the client fixture overrides FastAPI's get_session 
     # dependency. If we don't include it, the test database will not exist.
-    def test_signup_duplicate_email_rejected(self, monkeypatch, client, create_test_db):
+    def test_signup_duplicate_email_rejected(self, client, create_test_db):
         signup_payload = {
             "email": "someUser@gmail.com",
             "password": "MyPassword@123",
@@ -164,7 +164,7 @@ class TestAuthSignup:
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         assert signup_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert signup_response.json()["detail"] == "A user with this email address already exists."
+        assert signup_response.json()["detail"] == AuthResponseMessages.EMAIL_ALREADY_EXISTS 
 
         # Ensure no user was created.
         user = create_test_db.query(UserInternalModel).filter_by(
@@ -255,9 +255,7 @@ class TestAuthSignup:
         create_test_db.refresh(verification_token)
         assert verification_token.used is False
 
-        now = datetime.now(timezone.utc)
-        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verification_token.expires_at)
 
 
     def test_signup_raw_token_none(self, monkeypatch, client, create_test_db):
@@ -339,7 +337,7 @@ class TestAuthSendVerification:
         # initially.
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
         assert send_verification_response.status_code == status.HTTP_200_OK
-        assert send_verification_response.json()["message"] == "Verification email sent."
+        assert send_verification_response.json()["message"] == AuthResponseMessages.VERIF_EMAIL_SENT
 
         # We should have started with one token and should now have two.
         verification_tokens = create_test_db.query(VerificationTokenModel).filter_by(
@@ -360,9 +358,7 @@ class TestAuthSendVerification:
         assert new_token.user_id == user_id
 
         # Token must expire in the future 
-        now = datetime.now(timezone.utc)
-        expires_at = new_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(new_token.expires_at)
 
 
     def test_send_verification_raw_token_none(
@@ -413,7 +409,9 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_200_OK
-        assert send_verification_response.json()["message"] == "Failed to create token."
+        assert send_verification_response.json()["message"] == (
+            AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN
+        )
 
         # Ensure the old token was deleted
         remaining_tokens = create_test_db.query(VerificationTokenModel).filter_by(
@@ -465,8 +463,9 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert send_verification_response.json()["detail"] == "Email is already verified."
-
+        assert send_verification_response.json()["detail"] == (
+            AuthResponseMessages.EMAIL_ALREADY_VERIF
+        )
 
     def test_send_verification_token_deletion_failure(self, monkeypatch, client, create_test_db):
         # Create and authenticate user.
@@ -504,7 +503,7 @@ class TestAuthSendVerification:
 
         assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert send_verification_response.json()["detail"] == (
-            "An unexpected error occurred while preparing the verification token."
+            AuthResponseMessages.ERROR_PREP_VERIF_TOKEN
         )
 
          # Original signup token should still be intact.
@@ -554,8 +553,9 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert send_verification_response.json()["detail"] == "Failed to create verification token."
-
+        assert send_verification_response.json()["detail"] == (
+            AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN 
+        )
 
     def test_send_verification_email_failure(self, monkeypatch, client, create_test_db):
         # Patch email sending to fail. You can't normally raise an error with a lambda
@@ -593,7 +593,7 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_200_OK
-        assert send_verification_response.json()["message"] == "Verification email sent."
+        assert send_verification_response.json()["message"] == AuthResponseMessages.VERIF_EMAIL_SENT
 
         user = create_test_db.get(UserInternalModel, user_id)
         verification_token = create_test_db.query(VerificationTokenModel).filter_by(
@@ -667,10 +667,7 @@ class TestAuthVerifyEmail:
         assert user.verified_at is not None
 
         # The verification token should not be expired.
-        now = datetime.now(timezone.utc)
-        expires_at = verification_token_modified.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
-
+        assert is_in_future(verification_token_modified.expires_at)
 
     def test_verify_email_expired(self, client, create_test_db, monkeypatch):
         # monkeypatch token creation so signup uses a known raw token. The real 
@@ -712,15 +709,13 @@ class TestAuthVerifyEmail:
         create_test_db.commit()
 
         # Confirm expiration.
-        now = datetime.now(timezone.utc)
-        expires_at = verification_token_original.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at < now
+        assert is_in_past(verification_token_original.expires_at)
 
         # If we try sending an email verification link, it should fail (since we forced 
         # the token to be expired).
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email_response.json()["detail"] == "This verification link has expired."
+        assert verify_email_response.json()["detail"] == AuthResponseMessages.VERIF_LINK_EXPIRED
 
         # The verification token should not be marked used.
         verification_token_modified = create_test_db.query(VerificationTokenModel).filter_by(
@@ -777,7 +772,7 @@ class TestAuthVerifyEmail:
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
         assert verify_email_response.json()["detail"] == (
-            "This verification link has already been used."
+            AuthResponseMessages.VERIF_LINK_ALREADY_USED
         )
 
 
@@ -786,7 +781,7 @@ class TestAuthVerifyEmail:
         verify_email = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token=invalid_token")
 
         assert verify_email.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email.json()["detail"] == "Invalid or unknown verification token."
+        assert verify_email.json()["detail"] == AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
 
 
     def test_verify_email_token_deleted_with_user(self, client, create_test_db, monkeypatch):
@@ -830,7 +825,9 @@ class TestAuthVerifyEmail:
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
 
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email_response.json()["detail"] == "Invalid or unknown verification token."
+        assert verify_email_response.json()["detail"] == (
+            AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
+        )
 
 
     def test_verify_email_commit_failure(self, client, create_test_db, monkeypatch):
@@ -880,7 +877,7 @@ class TestAuthVerifyEmail:
 
         assert verify_email_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert verify_email_response.json()["detail"] == (
-            "An unexpected error occurred while verifying the email."
+            AuthResponseMessages.ERROR_VERIFYING_EMAIL
         )
 
         # Confirm the failed commit's rollback actually reverted the
@@ -946,7 +943,7 @@ class TestAuthRequestPasswordReset:
         # Recall that we should always get back OK as a security measure.
         assert request_password_reset_response.status_code == status.HTTP_200_OK
         assert request_password_reset_response.json()["message"] == (
-            "If the email exists, a reset link has been sent."
+            AuthResponseMessages.RESET_LINK_SENT
         )
 
         # A password reset verification token should exist.
@@ -958,10 +955,7 @@ class TestAuthRequestPasswordReset:
         assert verification_token.token_hash == expected_hash
         assert verification_token.user_id == user.id
         assert verification_token.used is False
-
-        now = (datetime.now(timezone.utc))
-        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verification_token.expires_at)
 
 
     def test_request_password_reset_nonexistent_email(self, client, create_test_db):
@@ -978,7 +972,7 @@ class TestAuthRequestPasswordReset:
         # Recall that we should always get back OK as a security measure.
         assert request_password_reset_response.status_code == status.HTTP_200_OK
         assert request_password_reset_response.json()["message"] == (
-            "If the email exists, a reset link has been sent."
+            AuthResponseMessages.RESET_LINK_SENT
         )
 
         # No token should have been created.
@@ -1033,7 +1027,7 @@ class TestAuthRequestPasswordReset:
         )
         assert request_password_reset_response.status_code == status.HTTP_200_OK
         assert request_password_reset_response.json()["message"] == (
-            "If the email exists, a reset link has been sent."
+            AuthResponseMessages.RESET_LINK_SENT
         )
 
         # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
@@ -1050,10 +1044,7 @@ class TestAuthRequestPasswordReset:
         assert len(verification_tokens) == 1
         assert verification_tokens[0].token_hash == expected_hash
         assert verification_tokens[0].user_id == user.id
-
-        now = datetime.now(timezone.utc)
-        expires_at = verification_tokens[0].expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verification_tokens[0].expires_at)
 
 
     def test_request_password_reset_email_send_failure(self, client, create_test_db, monkeypatch):
@@ -1105,7 +1096,7 @@ class TestAuthRequestPasswordReset:
         # Recall that we should always get back OK as a security measure.
         assert request_password_reset_response.status_code == status.HTTP_200_OK
         assert request_password_reset_response.json()["message"] == (
-            "If the email exists, a reset link has been sent."
+            AuthResponseMessages.RESET_LINK_SENT
         )
 
         # A password reset verification token should exist.
@@ -1118,10 +1109,7 @@ class TestAuthRequestPasswordReset:
         assert verification_token.token_hash == expected_hash
         assert verification_token.user_id == user.id
         assert verification_token.used is False
-
-        now = datetime.now(timezone.utc)
-        expires_at = verification_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verification_token.expires_at)
 
 
 # ---------------------------------------------------------
@@ -1212,10 +1200,7 @@ class TestAuthResetPassword:
         assert verif_token_after_reset.token_hash == token_hash
         assert verif_token_after_reset.purpose == PASSWORD_RESET
         assert verif_token_after_reset.user_id == user.id
-
-        expires_at = verif_token_after_reset.expires_at.replace(tzinfo = timezone.utc)
-        now = datetime.now(timezone.utc)
-        assert expires_at > now
+        assert is_in_future(verif_token_after_reset.expires_at)
 
         # Password should be updated
         updated_user = create_test_db.query(UserInternalModel).filter_by(id = user.id).first()
@@ -1517,7 +1502,7 @@ class TestAuthResetPassword:
         )
         assert reset_password_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert reset_password_response.json()["detail"] == (
-            "An unexpected error occurred while resetting the password."
+            AuthResponseMessages.ERROR_RESETTING_PASSWORD
         )
 
         # Force SQLAlchemy to reload fresh state. Needed because two different SQLAlchemy
@@ -1711,9 +1696,7 @@ class TestAuthLogin:
         ).first()
         assert session_token is not None
         assert session_token.revoked_at is None
-        now = datetime.now(timezone.utc)
-        expires_at = session_token.expires_at.replace(tzinfo = timezone.utc)
-        assert expires_at > now
+        assert is_in_future(session_token.expires_at)
 
         # The refresh_token cookie must match the DB session.
         raw_refresh_token = login_response.cookies.get("refresh_token")
@@ -1746,7 +1729,7 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == "Invalid email or password."
+        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1776,7 +1759,7 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == "Invalid email or password."
+        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1909,7 +1892,7 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert login_response.json()["detail"] == "Could not create session token."
+        assert login_response.json()["detail"] == AuthResponseMessages.CANT_CREATE_SESSION_TOKEN
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1973,14 +1956,8 @@ class TestAuthLogin:
 
         assert (now - created_at).total_seconds() < 5
 
-        expires_at = session_token.expires_at
-
-        # Normalize SQLite naive datetime to UTC aware.
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo = timezone.utc)
-
         # expires_at must be in the future.
-        assert expires_at > now
+        assert is_in_future(session_token.expires_at)
 
         # user_agent and ip_address must be set.
         assert session_token.user_agent is not None
@@ -2092,7 +2069,7 @@ class TestAuthLogin:
 
         # Response must still be the generic 401.
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == "Invalid email or password."
+        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
 
         # verify_password must have been called exactly once.
         assert len(calls) == 1
@@ -2216,7 +2193,7 @@ class TestAuthLogout:
         logout_response = client.post(AUTH_LOGOUT_PREFIX)
 
         assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert logout_response.json()["detail"] == "Could not revoke session token."
+        assert logout_response.json()["detail"] == AuthResponseMessages.COULD_NOT_REVOKE_SESSION
 
         # Cookies should still be cleared even on failure.
         set_cookie_header = logout_response.headers.get("set-cookie", "")
@@ -2250,7 +2227,7 @@ class TestAuthLogoutAll:
         logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
         assert logout_response.status_code == status.HTTP_200_OK
-        assert logout_response.json()["message"] == "Logged out of all devices."
+        assert logout_response.json()["message"] == AuthResponseMessages.LOGGED_OUT_ALL_DEVICES
 
         set_cookie_headers = logout_response.headers.get_list("set-cookie")
 
@@ -2272,7 +2249,7 @@ class TestAuthLogoutAll:
         logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
         assert logout_response.status_code == status.HTTP_200_OK
-        assert logout_response.json()["message"] == "Logged out of all devices."
+        assert logout_response.json()["message"] == AuthResponseMessages.LOGGED_OUT_ALL_DEVICES
 
         # The response should delete both cookies.
         set_cookie_headers = logout_response.headers.get_list("set-cookie")
@@ -2334,7 +2311,7 @@ class TestAuthLogoutAll:
         create_test_db.expire_all()
 
         assert logout_response.status_code == status.HTTP_200_OK
-        assert logout_response.json()["message"] == "Logged out of all devices."
+        assert logout_response.json()["message"] == AuthResponseMessages.LOGGED_OUT_ALL_DEVICES
 
         # All sessions for this user should now be revoked.
         user_sessions = create_test_db.query(SessionTokenModel).filter(
@@ -2372,7 +2349,7 @@ class TestAuthLogoutAll:
         logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
         assert logout_response.status_code == status.HTTP_200_OK
-        assert logout_response.json()["message"] == "Logged out of all devices."
+        assert logout_response.json()["message"] == AuthResponseMessages.LOGGED_OUT_ALL_DEVICES
 
         # No session row should exist for this hash.
         refresh_token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
@@ -2403,7 +2380,9 @@ class TestAuthLogoutAll:
         logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
         assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert logout_response.json()["detail"] == "Could not revoke all session tokens."
+        assert logout_response.json()["detail"] == (
+            AuthResponseMessages.COULD_NOT_REVOKE_ALL_SESSIONS
+        )
 
         # Cookies should not be cleared on failure (logout_all differs from logout).
         set_cookie_header = logout_response.headers.get("set-cookie")
@@ -2438,7 +2417,7 @@ class TestAuthActiveSessions:
         now = datetime.now(timezone.utc)
         later = now + timedelta(minutes = 5)
 
-        second_session = SessionTokenModel(
+        second_active_session = SessionTokenModel(
             user_id = user.id,
             refresh_token_hash = "fake_refresh_token_hash",
             refresh_token_id = uuid.uuid4(),
@@ -2447,7 +2426,34 @@ class TestAuthActiveSessions:
             user_agent = "pytest-agent",
             ip_address = "127.0.0.1"
         )
-        create_test_db.add(second_session)
+        create_test_db.add(second_active_session)
+        create_test_db.commit()
+
+        # Add a revoked session.
+        revoked_session = SessionTokenModel(
+            user_id = user.id,
+            refresh_token_hash = "revoked_hash",
+            refresh_token_id = uuid.uuid4(),
+            created_at = now - timedelta(minutes = 10),
+            expires_at = now + timedelta(days = 30),
+            revoked_at = now - timedelta(days = 1),
+            user_agent = "revoked-agent",
+            ip_address = "127.0.0.1"
+        )
+        create_test_db.add(revoked_session)
+        create_test_db.commit()
+
+        # Add an expired session.
+        expired_session = SessionTokenModel(
+            user_id = user.id,
+            refresh_token_hash = "expired_hash",
+            refresh_token_id = uuid.uuid4(),
+            created_at = now - timedelta(minutes = 20),
+            expires_at = now - timedelta(days = 1),
+            user_agent = "expired-agent",
+            ip_address = "127.0.0.1"
+        )
+        create_test_db.add(expired_session)
         create_test_db.commit()
 
         # Create another user with their own session.
@@ -2460,7 +2466,7 @@ class TestAuthActiveSessions:
         create_test_db.add(other_user)
         create_test_db.commit()
 
-        other_session = SessionTokenModel(
+        other_active_session = SessionTokenModel(
             user_id = other_user.id,
             refresh_token_hash = "other_hash",
             refresh_token_id = uuid.uuid4(),
@@ -2469,21 +2475,7 @@ class TestAuthActiveSessions:
             user_agent = "other-agent",
             ip_address = "10.0.0.1"
         )
-        create_test_db.add(other_session)
-        create_test_db.commit()
-
-        # Create a revoked session for the first user.
-        revoked_session = SessionTokenModel(
-            user_id = user.id,
-            refresh_token_hash = "revoked_hash",
-            refresh_token_id = uuid.uuid4(),
-            created_at = now - timedelta(minutes = 10),
-            expires_at = now + timedelta(days = 30),
-            revoked_at = now - timedelta(days = 1),
-            user_agent = "revoked-agent",
-            ip_address = "127.0.0.1"
-        )
-        create_test_db.add(revoked_session)
+        create_test_db.add(other_active_session)
         create_test_db.commit()
 
         # Authenticate the user by setting the access token cookie.
@@ -2502,18 +2494,21 @@ class TestAuthActiveSessions:
 
         assert action_sessions_response.status_code == status.HTTP_200_OK
 
+        # Out of five total sessions, only the two active ones for the test user should 
+        # be returned (one was made by a fixture).
         sessions = action_sessions_response.json()["sessions"]
-        assert len(sessions) == 3
+        assert len(sessions) == 2
 
         # Sessions should be sorted by created_at in descending order.
         created_at_times = [s["created_at"] for s in sessions]
         assert created_at_times == sorted(created_at_times, reverse = True)
 
-        # Make sure the other user's session is not included and the
-        # revoked session is included.
+        # Make sure the test user's expired and revoked sessions as well as the 
+        # other user's session are not included.
         session_ids = {s["id"] for s in sessions}
-        assert str(other_session.id) not in session_ids
-        assert str(revoked_session.id) in session_ids
+        assert str(revoked_session.id) not in session_ids
+        assert str(expired_session.id) not in session_ids
+        assert str(other_active_session.id) not in session_ids
 
         # Validate fields for one of the sessions.
         first_session = sessions[0]
@@ -2521,9 +2516,6 @@ class TestAuthActiveSessions:
         assert "ip_address" in first_session
         assert "expires_at" in first_session
         assert "revoked_at" in first_session
-
-        assert first_session["user_agent"] == "pytest-agent"
-        assert first_session["ip_address"] == "127.0.0.1"
         assert first_session["revoked_at"] is None
 
 
@@ -2563,7 +2555,9 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_200_OK
-        assert terminate_session_response.json()["message"] == "Session terminated successfully."
+        assert terminate_session_response.json()["message"] == (
+            AuthResponseMessages.SESSION_TERMINATED_SUCCESS
+        )
 
         # The session should now be revoked. Grab the updated row from the DB. Otherwise, 
         # we may have a stale session_token.
@@ -2595,8 +2589,9 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_200_OK
-        assert terminate_session_response.json()["message"] == "Session already terminated."
-
+        assert terminate_session_response.json()["message"] == (
+            AuthResponseMessages.SESSION_ALREADY_TERMINATED
+        )
 
     def test_terminate_session_not_found(
         self,
@@ -2616,7 +2611,7 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
-        assert terminate_session_response.json()["detail"] == "Session not found."
+        assert terminate_session_response.json()["detail"] == AuthResponseMessages.SESSION_NOT_FOUND
 
 
     def test_terminate_session_commit_failure(
@@ -2647,7 +2642,9 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert terminate_session_response.json()["detail"] == "Failed to terminate session."
+        assert terminate_session_response.json()["detail"] == (
+            AuthResponseMessages.FAILED_TERMINATE_SESSION
+        )
 
         # Ensure the session was not revoked.
         create_test_db.expire_all()
@@ -2706,7 +2703,7 @@ class TestAuthTerminateSession:
 
         # It should fail, since we did not set an access token.
         assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
-        assert terminate_session_response.json()["detail"] == "Session not found."
+        assert terminate_session_response.json()["detail"] == AuthResponseMessages.SESSION_NOT_FOUND
 
         create_test_db.expire_all()
 
@@ -2857,7 +2854,9 @@ class TestAuthRefresh:
         second_refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert second_refresh_response.json()["detail"] == "Refresh token expired or stale."
+        assert second_refresh_response.json()["detail"] == (
+            AuthResponseMessages.REFRESH_TOKEN_EXPIRED_STALE
+        )
 
         # We should have one removked token from the first refresh + one new sesion token.
         # The benign replay (second call to refresh) should produce no more tokens.
@@ -2937,7 +2936,7 @@ class TestAuthRefresh:
 
         assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert second_refresh_response.json()["detail"] == (
-            "Refresh token reuse detected. All sessions revoked."
+            AuthResponseMessages.REUSE_DETECTED_SESSIONS_REVOKED
         )
 
         # All sessions for the test user should be revoked to protect against malicious 
@@ -2962,7 +2961,9 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == "Missing refresh token."
+        assert refresh_response.json()["detail"] == (
+            AuthResponseMessages.MISSING_REFRESH_TOKEN
+        )
 
 
     def test_refresh_invalid_refresh_token_returns_401(self, client, create_test_db):
@@ -2972,7 +2973,7 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == "Invalid refresh token."
+        assert refresh_response.json()["detail"] == AuthResponseMessages.INVALID_REFRESH_TOKEN
 
 
     def test_refresh_expired_refresh_token_returns_401(
@@ -2997,7 +2998,7 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == "Refresh token expired."
+        assert refresh_response.json()["detail"] == AuthResponseMessages.REFRESH_TOKEN_EXPIRED
 
 
     def test_refresh_atomic_update_fails_returns_401(
@@ -3031,7 +3032,7 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == "Refresh token expired."
+        assert refresh_response.json()["detail"] == AuthResponseMessages.REFRESH_TOKEN_EXPIRED
 
         create_test_db.expire_all()
 
@@ -3179,7 +3180,7 @@ class TestAuthExportUserData:
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
-        assert dsar_logs[0].notes == "Failed to export user data."
+        assert dsar_logs[0].notes == AuthResponseMessages.FAILED_EXPORT_USER_DATA
         assert dsar_logs[0].fulfilled_at is None
 
 
@@ -3323,9 +3324,21 @@ class TestAuthDeleteUserData:
         user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user.id)
         assert user_tea_profile_notes == []
 
+        # Session tokens should be deleted.
+        session_tokens = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user.id
+        ).all()
+        assert session_tokens == []
+
+        # Verification tokens should be deleted
+        verification_tokens_after = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user.id
+        ).all()
+        assert verification_tokens_after == []
+
         # Verify the user account still exists.
-        user = create_test_db.get(UserInternalModel, user.id)
-        assert user is not None
+        user_after_delete = create_test_db.get(UserInternalModel, user.id)
+        assert user_after_delete is not None
 
         # Verify that a DSAR log was created and fulfilled.
         dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user.id).all()
@@ -3334,6 +3347,7 @@ class TestAuthDeleteUserData:
         assert dsar_logs[0].request_type == DSAR_REQUEST_DELETE_USER_DATA
         assert dsar_logs[0].status == DSAR_STATUS_FULFILLED
         assert dsar_logs[0].fulfilled_at is not None
+        assert dsar_logs[0].notes is None
 
 
     def test_delete_user_data_fails_if_no_access_token(
@@ -3394,12 +3408,55 @@ class TestAuthDeleteUserData:
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
-        assert dsar_logs[0].notes == "Failed to delete user data."
+        assert dsar_logs[0].notes == AuthResponseMessages.FAILED_TO_DELETE_USER_DATA
         assert dsar_logs[0].fulfilled_at is None
 
         # Verify that user-generated data was not deleted.
         user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user.id)
         assert user_tea_profile_notes != []
+
+
+    def test_delete_user_data_does_not_delete_other_users_data(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_user,
+        create_test_db,
+        user_tea_profile_notes_repo,
+        empty_user_tea_profile_notes_inbound,
+        long_jing_tea_profile_id
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+
+        user.last_login = datetime.now(timezone.utc)
+
+        create_test_db.commit()
+
+        # Create another user and some notes for them.
+        other_user = create_test_user(
+            email = "otherUser@somedomain.com",
+            password = "OtherPassword@123",
+            display_name = "Other User",
+            is_verified = True
+        )
+
+        user_tea_profile_notes_repo.create(
+            user_id = other_user.id,
+            tea_profile_id = long_jing_tea_profile_id,
+            inbound_schema = empty_user_tea_profile_notes_inbound
+        )
+        create_test_db.commit()
+
+        # Authenticate the test user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Delete the test user's data.
+        response = client.delete(AUTH_DELETE_USER_DATA_PREFIX)
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+
+        # Other user's notes must remain untouched.
+        other_user_notes = user_tea_profile_notes_repo.get_by_user_id(other_user.id)
+        assert other_user_notes != []
 
 
 # ---------------------------------------------------------
@@ -3445,6 +3502,18 @@ class TestAuthDeleteUserAccount:
         # Verify user-generated data was deleted.
         user_tea_profile_notes = user_tea_profile_notes_repo.get_by_user_id(user_id)
         assert user_tea_profile_notes == []
+
+        # Session tokens should be deleted.
+        sessions_tokens = create_test_db.query(SessionTokenModel).filter_by(
+            user_id = user_id
+        ).all()
+        assert sessions_tokens == []
+
+        # Verification tokens should be deleted.
+        verification_tokens = create_test_db.query(VerificationTokenModel).filter_by(
+            user_id = user_id
+        ).all()
+        assert verification_tokens == []
 
         # Verify the user account was deleted.
         user = create_test_db.get(UserInternalModel, user_id)
@@ -3520,7 +3589,7 @@ class TestAuthDeleteUserAccount:
 
         assert len(dsar_logs) == 1
         assert dsar_logs[0].status == DSAR_STATUS_FAILED
-        assert dsar_logs[0].notes == "Failed to delete user account."
+        assert dsar_logs[0].notes == AuthResponseMessages.FAILED_TO_DELETE_ACCOUNT
         assert dsar_logs[0].fulfilled_at is None
 
         # Verify that the user account was not deleted.
@@ -3553,59 +3622,61 @@ class TestAuthDeleteUserAccount:
 
         # It should fail.
         assert delete_account_response.status_code == status.HTTP_403_FORBIDDEN
-        assert delete_account_response.json()["detail"] == "Password confirmation required."
+        assert delete_account_response.json()["detail"] == AuthResponseMessages.PASSWORD_CONFIRM_REQ
 
         # User should still exist.
         assert create_test_db.get(UserInternalModel, user_id) is not None
 
 
-    def test_delete_user_account_success_after_confirmation(
+    def test_delete_user_account_does_not_delete_other_users_data(
         self,
         client,
         refresh_token_bundle_for_test_user,
+        create_test_user,
         create_test_db,
         user_tea_profile_notes_repo,
-        long_jing_tea_profile_id,
         empty_user_tea_profile_notes_inbound,
+        long_jing_tea_profile_id
     ):
         user = refresh_token_bundle_for_test_user["user"]
-        user_id = user.id
-
-        # Simulate a fresh login.
         user.last_login = datetime.now(timezone.utc)
+
         create_test_db.commit()
 
-        # Create some user-generated data.
+        # Create another user and some notes.
+        other_user = create_test_user(
+            email = "otherUser@somedomain.com",
+            password = "OtherPassword@123",
+            display_name = "Other User",
+            is_verified = True
+        )
+
         user_tea_profile_notes_repo.create(
-            user_id = user_id,
+            user_id = other_user.id,
             tea_profile_id = long_jing_tea_profile_id,
             inbound_schema = empty_user_tea_profile_notes_inbound
         )
         create_test_db.commit()
 
-        # Authenticate.
-        client.cookies.set("access_token", create_access_token(str(user_id), True))
+        # Authenticate the test user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
 
-        # Confirm password.
-        confirm_payload = { "password": "MyPassword@123" }
-        confirm_response = client.post(AUTH_CONFIRM_PASSWORD_PREFIX, json = confirm_payload)
-        assert confirm_response.status_code == status.HTTP_204_NO_CONTENT
+        # Confirm test user password.
+        client.post(
+            AUTH_CONFIRM_PASSWORD_PREFIX,
+            json = {"password": "MyPassword@123"}
+        )
 
-        # Delete account.
-        delete_account_response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
-        assert delete_account_response.status_code == status.HTTP_204_NO_CONTENT
+        # Delete the test user account.
+        delete_user_account_response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+        assert delete_user_account_response.status_code == status.HTTP_204_NO_CONTENT
 
-        create_test_db.expire_all()
+        # Other user's account must remain
+        assert create_test_db.get(UserInternalModel, other_user.id) is not None
 
-        # User should be deleted.
-        assert create_test_db.get(UserInternalModel, user_id) is None
-
-        # Notes should be deleted.
-        assert user_tea_profile_notes_repo.get_by_user_id(user_id) == []
-
-        # DSAR logs should be gone.
-        dsar_logs = create_test_db.query(DSARLogModel).filter_by(user_id = user_id).all()
-        assert dsar_logs == []
+        # Other user's notes must remain
+        other_user_notes = user_tea_profile_notes_repo.get_by_user_id(other_user.id)
+        assert other_user_notes != []
 
 
 # ---------------------------------------------------------
@@ -3671,7 +3742,7 @@ class TestAuthPasswordConfirmation:
         )
 
         assert confirm_password_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert confirm_password_response.json()["detail"] == "Invalid password."
+        assert confirm_password_response.json()["detail"] == AuthResponseMessages.INVALID_PASSWORD
 
         create_test_db.expire_all()
 
@@ -3683,3 +3754,132 @@ class TestAuthPasswordConfirmation:
             == 0
         )
 
+
+    def test_confirm_password_commit_failure(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+        monkeypatch
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+        user.last_login = datetime.now(timezone.utc)
+
+        create_test_db.commit()
+
+        # Authenticate test user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        def fail_commit(self, *args, **kwargs):
+            raise Exception("Commit failed.")
+        
+        monkeypatch.setattr(Session, "commit", fail_commit)
+
+        confirm_password_response = client.post(
+            AUTH_CONFIRM_PASSWORD_PREFIX,
+            json = {"password": "MyPassword@123"}
+        )
+
+        assert confirm_password_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        # No confirmation should be created.
+        confirmations = create_test_db.query(PasswordConfirmationModel).filter_by(
+            user_id = user.id
+        ).all()
+        assert confirmations == []
+
+
+    def test_confirm_password_expired_confirmation(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+        user_id = user.id
+
+        user.last_login = datetime.now(timezone.utc)
+
+        create_test_db.commit()
+
+        # Authenticate test user.
+        client.cookies.set("access_token", create_access_token(str(user_id), True))
+
+        # Create an expired confirmation (older than 5 minutes)
+        expired_time = datetime.now(timezone.utc) - timedelta(minutes = 6)
+        expired_password_confirmation = PasswordConfirmationModel(
+            user_id = user_id,
+            created_at = expired_time
+        )
+        create_test_db.add(expired_password_confirmation)
+        create_test_db.commit()
+
+        # Attempt account deletion. should fail because confirmation is expired.
+        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json()["detail"] == AuthResponseMessages.PASSWORD_CONFIRM_REQ
+
+
+    def test_confirm_password_fails_if_no_access_token(self, client):
+
+        confirm_password_response = client.post(
+            AUTH_CONFIRM_PASSWORD_PREFIX,
+            json = {"password": "MyPassword@123"}
+        )
+
+        assert confirm_password_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+    def test_confirm_password_requires_fresh_login(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+
+        # Simulate stale login.
+        user.last_login = datetime.now(timezone.utc) - timedelta(hours = 2)
+        create_test_db.commit()
+
+        # Authenticate test user.
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Try to confirm password. It should fail.
+        confirm_password_response = client.post(
+            AUTH_CONFIRM_PASSWORD_PREFIX,
+            json = {"password": "MyPassword@123"}
+        )
+
+        assert confirm_password_response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert confirm_password_response.json()["detail"] == (
+            "Your login session is too old. Please log in again."
+        )
+
+
+    def test_confirm_password_confirmation_valid_at_boundary(
+        self,
+        client,
+        refresh_token_bundle_for_test_user,
+        create_test_db,
+    ):
+        user = refresh_token_bundle_for_test_user["user"]
+        user.last_login = datetime.now(timezone.utc)
+
+        create_test_db.commit()
+
+        # Create a confirmation that is 4 minutes 59 seconds old
+        confirmation = PasswordConfirmationModel(
+            user_id = user.id,
+            created_at = datetime.now(timezone.utc) - timedelta(minutes = 4, seconds = 59)
+        )
+        create_test_db.add(confirmation)
+        create_test_db.commit()
+
+        client.cookies.set("access_token", create_access_token(str(user.id), True))
+
+        # Now call a high-risk endpoint that requires a valid confirmation.
+        response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT

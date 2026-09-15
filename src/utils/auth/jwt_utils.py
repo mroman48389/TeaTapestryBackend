@@ -18,15 +18,15 @@ def create_access_token(user_id: str, email_verified: bool) -> str:
         Create a short-lived JWT access token for protected API routes.
         Sent in Authorization: Bearer <token>.
     """
-    datetime_now = datetime.now(timezone.utc)
-    datetime_expired = datetime_now + timedelta(minutes = ACCESS_TOKEN_LIFETIME_MINUTES)
+    now = datetime.now(timezone.utc)
+    expired = now + timedelta(minutes = ACCESS_TOKEN_LIFETIME_MINUTES)
 
     payload = AccessTokenPayloadSchema(
         sub = UUID(user_id),                       
         scope = "access",                      
         email_verified = email_verified,
-        iat = int(datetime_now.timestamp()),    
-        exp = int(datetime_expired.timestamp()) 
+        iat = int(now.timestamp()),    
+        exp = int(expired.timestamp()) 
     )
 
     token = jwt.encode(
@@ -46,15 +46,15 @@ def create_refresh_token(
         Create a long-lived JWT refresh token.
         Stored in HttpOnly cookie.
     """
-    datetime_now = datetime.now(timezone.utc)
-    datetime_expired = datetime_now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS)
+    now = datetime.now(timezone.utc)
+    expired = now + timedelta(days = REFRESH_TOKEN_LIFETIME_DAYS)
 
     payload = RefreshTokenPayloadSchema(
         sub = UUID(user_id),                           
         scope = "refresh",                       
         email_verified = email_verified,
-        iat = int(datetime_now.timestamp()),     
-        exp = int(datetime_expired.timestamp()), 
+        iat = int(now.timestamp()),     
+        exp = int(expired.timestamp()), 
         jti = str(uuid.uuid4()),                 
         refresh_token_id = UUID(refresh_token_id)
     )

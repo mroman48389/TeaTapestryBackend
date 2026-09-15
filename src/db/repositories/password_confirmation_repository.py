@@ -1,9 +1,10 @@
-from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from src.db.models.auth.password_confirmation_model import PasswordConfirmationModel
+from src.constants.auth_constants import FRESH_LOGIN_WINDOW_TD
+from src.utils.time_utils import is_younger_than
 
 
 class PasswordConfirmationRepository:
@@ -31,10 +32,4 @@ class PasswordConfirmationRepository:
         if record is None:
             return False
 
-        now = datetime.now(timezone.utc)
-
-        created_at = record.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo = timezone.utc)
-
-        return (now - created_at) <= timedelta(minutes = 5)
+        return is_younger_than(record.created_at, FRESH_LOGIN_WINDOW_TD, True)

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from src.utils.session_utils import get_session
 from src.db.models.auth.user_models import UserInternalModel
 from src.utils.auth.jwt_utils import decode_access_token
+from src.api.constants.auth_response_messages import AuthResponseMessages
 
 def get_current_user(
     request: Request,
@@ -45,7 +46,7 @@ def get_current_user(
     if not user:
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "User no longer exists."
+            detail = AuthResponseMessages.USER_NO_LONGER_EXISTS 
         )
 
     return user

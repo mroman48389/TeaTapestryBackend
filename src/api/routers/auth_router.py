@@ -15,10 +15,8 @@ import gzip
 # Constants
 
 from src.constants.jwt_constants import (
-    ACCESS_TOKEN_LIFETIME_MINUTES,
     REFRESH_TOKEN_LIFETIME_DAYS
 )
-from src.constants.cookie_constants import SAME_SITE_VALUE
 from src.constants.route_constants import (
     AUTH,
     AUTH_PREFIX,
@@ -49,9 +47,10 @@ from src.constants.token_constants import (
     PASSWORD_RESET
 )
 from src.constants.auth_constants import (
-    FRESH_LOGIN_WINDOW_SECONDS,
+    FRESH_LOGIN_WINDOW_TD,
     CONCURRENT_REFRESH_GRACE_SECONDS
 )
+from src.api.constants.auth_response_messages import AuthResponseMessages
 
 
 # Config and setup
@@ -90,7 +89,11 @@ from src.utils.request_metadata_utils import (
     get_client_ip,
     get_user_agent
 )
-from src.utils.auth.cookie_utils import delete_auth_token_cookies
+from src.utils.auth.cookie_utils import (
+    delete_auth_token_cookies,
+    set_auth_token_cookies
+)
+from src.utils.time_utils import is_older_than, is_in_past
 
 # Models
 
@@ -142,6 +145,7 @@ from src.app.services.user_data_deletion_services import (
 
 
 # Repositories
+
 from src.db.repositories.user_tea_profile_notes_repository import UserTeaProfileNotesRepository
 from src.db.repositories.dsar_log_repository import DSARLogRepository
 from src.db.repositories.password_confirmation_repository import PasswordConfirmationRepository
@@ -161,28 +165,13 @@ DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-timing")
 # Requiring a recent login (within the past 5 minutes) protects against
 # stolen long-lived session tokens, compromised devices, unattended browsers,
 # and malicious scripts.
-def _require_fresh_login(current_user: UserInternalModel):
-    if current_user.last_login is None:
-        raise HTTPException(
-            status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = "Please log in again before exporting your data."
-        )
-
+def _require_fresh_login(current_user: UserInternalModel, error_msg: str):
     last_login = current_user.last_login
 
-    # Normalize naive datetimes (SQLite strips timezone info in testing).
-    if last_login.tzinfo is None:
-        last_login = last_login.replace(tzinfo = timezone.utc)
-
-    now = datetime.now(timezone.utc)
-
-    if (now - last_login) > timedelta(seconds = FRESH_LOGIN_WINDOW_SECONDS):
+    if (last_login is None) or is_older_than(last_login, FRESH_LOGIN_WINDOW_TD):
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED,
-            detail = (
-                "Your login session is too old. "
-                "Please log in again before exporting your data."
-            )
+            detail = "Your login session is too old. " + error_msg
         )
 
 ###############################################################################
@@ -204,7 +193,16 @@ def _require_fresh_login(current_user: UserInternalModel):
 @router.post(
     f"/{SIGNUP}", 
     response_model = UserOutboundSchema, 
-    status_code = status.HTTP_201_CREATED
+    status_code = status.HTTP_201_CREATED,
+    summary = "Registers a new user.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Validates the strength of the provided password."
+        "- Generates an email verification token. Failure does not prevent "
+        "account creation. \n"
+        "- Sends a verification email on a best-effort basis. "
+        "Failure does not roll back account creation.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def signup(
@@ -241,7 +239,7 @@ def signup(
         if existing_user:
             raise HTTPException(
                 status_code = status.HTTP_400_BAD_REQUEST,
-                detail = "A user with this email address already exists."
+                detail = AuthResponseMessages.EMAIL_ALREADY_EXISTS 
             )
 
         # Hash the password.
@@ -267,7 +265,7 @@ def signup(
 
             raise HTTPException(
                 status_code = status.HTTP_400_BAD_REQUEST,
-                detail = "A user with this email address already exists."
+                detail = AuthResponseMessages.EMAIL_ALREADY_EXISTS 
             )
         
         except Exception:
@@ -277,10 +275,12 @@ def signup(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "An unexpected error occurred while creating the account."
+                detail = AuthResponseMessages.ERROR_CREATING_ACCOUNT 
             )
 
         try:
+            # Reload server-generated fields like the id (primary key), or
+            # we risk them being None.
             session.refresh(new_user)
 
         except Exception:
@@ -290,9 +290,10 @@ def signup(
             # wrong. Log it. downstream code will still need new_user.id, so this
             # is likely to surface again shortly if the connection is genuinely bad.
             safe_exception("Unexpected error refreshing new user after signup.")
+
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "An unexpected error occurred while refreshing the new account."
+                detail = AuthResponseMessages.ERROR_REFRESH_ACCOUNT
             )
 
         # Create a verification token for the new user .
@@ -304,6 +305,7 @@ def signup(
             return new_user
 
         try:
+            # Commit the the verification token added by create_raw_verification_token.
             session.commit()
 
         except Exception:
@@ -313,7 +315,7 @@ def signup(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Failed to create verification token.",
+                detail = AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN 
             )
 
         try:
@@ -356,7 +358,15 @@ def signup(
 @router.post(
     f"/{SEND_VERIFICATION}", 
     status_code = status.HTTP_200_OK,
-    response_model = SendVerificationResponseSchema
+    response_model = SendVerificationResponseSchema,
+    summary = "Resends an email‑verification link for an authenticated user.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Deletes any existing email verification tokens for the user.\n"
+        "- Attempts to create a new email verification token. Failure returns a 200.\n"
+        "- Sends a verification email on a best-effort basis.\n"
+        "- Email sending failures do not roll back token creation.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def send_verification(
@@ -372,11 +382,11 @@ def send_verification(
     if current_user.is_verified:
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
-            detail = "Email is already verified."
+            detail = AuthResponseMessages.EMAIL_ALREADY_VERIF
         )
 
     try:
-        # Delete old tokens for this user.
+        # Delete old verification tokens for this user.
         session.query(VerificationTokenModel).filter(
             VerificationTokenModel.user_id == current_user.id,
             VerificationTokenModel.purpose == EMAIL_VERIFICATION
@@ -391,17 +401,18 @@ def send_verification(
 
         raise HTTPException(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail = "An unexpected error occurred while preparing the verification token."
+            detail = AuthResponseMessages.ERROR_PREP_VERIF_TOKEN
         )
 
     raw_token = create_raw_verification_token(current_user, session, EMAIL_VERIFICATION)
 
     if raw_token is None:
         return SendVerificationResponseSchema(
-            message = "Failed to create token."
+            message = AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN
         )
 
     try:
+        # Commit the raw token added by create_raw_verification_token.
         session.commit()
 
     except Exception:
@@ -411,7 +422,7 @@ def send_verification(
 
         raise HTTPException(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail = "Failed to create verification token.",
+            detail = AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN,
         )
 
     try:
@@ -422,13 +433,20 @@ def send_verification(
     except Exception:
         safe_exception("Error sending verification email.")
 
-    return SendVerificationResponseSchema(message = "Verification email sent.")
+    return SendVerificationResponseSchema(message = AuthResponseMessages.VERIF_EMAIL_SENT)
 
 
 @router.post(
     f"/{VERIFY_EMAIL}", 
     status_code = status.HTTP_200_OK,
-    response_model = VerifyEmailResponseSchema
+    response_model = VerifyEmailResponseSchema,
+    summary = "Verifies a user's email using a one‑time email verification token.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Accepts a one-time email verification token.\n"
+        "- Rejects tokens that are invalid, expired, or already used.\n"
+        "- Marks the token as used after successful verification.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def verify_email(
@@ -456,29 +474,21 @@ def verify_email(
     if not verification_token:
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
-            detail = "Invalid or unknown verification token."
+            detail = AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
         )
 
     # Check if the token was already used.
     if verification_token.used:
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
-            detail = "This verification link has already been used."
+            detail = AuthResponseMessages.VERIF_LINK_ALREADY_USED
         )
 
     # Check to see if the verification token is expired.
-    expires_at = verification_token.expires_at
-
-    # SQLite strips timezone info, so normalize naive timestamps to UTC
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo = timezone.utc)
-
-    now = datetime.now(timezone.utc)
-
-    if expires_at < now:
+    if is_in_past(verification_token.expires_at):
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
-            detail = "This verification link has expired."
+            detail = AuthResponseMessages.VERIF_LINK_EXPIRED
         )
 
     # Fetch the user.
@@ -489,7 +499,7 @@ def verify_email(
     if not user:
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
-            detail = "User no longer exists."
+            detail = AuthResponseMessages.USER_NO_LONGER_EXISTS 
         )
 
     try:
@@ -498,7 +508,7 @@ def verify_email(
 
         # Mark the user as verified and add the time verified.
         user.is_verified = True
-        user.verified_at = now
+        user.verified_at = datetime.now(timezone.utc)
 
         session.commit()
 
@@ -509,10 +519,10 @@ def verify_email(
 
         raise HTTPException(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail = "An unexpected error occurred while verifying the email."
+            detail = AuthResponseMessages.ERROR_VERIFYING_EMAIL
         )
 
-    return VerifyEmailResponseSchema(message = "Email verified successfully.")
+    return VerifyEmailResponseSchema(message = AuthResponseMessages.EMAIL_VERIFIED)
 
 
 # Postman test steps for testing request_password_reset and reset_password:
@@ -546,7 +556,16 @@ def verify_email(
 @router.post(
     f"/{REQUEST_PASSWORD_RESET}", 
     status_code = status.HTTP_200_OK,
-    response_model = PasswordResetRequestResponseSchema
+    response_model = PasswordResetRequestResponseSchema,
+    summary = "Initiates the password reset process.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Returns a generic success message to prevent email enumeration.\n"
+        "- Deletes any existing password reset tokens for the user.\n"
+        "- Attempts to create a new password reset token. Failure still returns 200.\n"
+        "- Sends a reset email on a best-effort basis.\n"
+        "- Email sending failures do not roll back token creation.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def request_password_reset(
@@ -561,8 +580,6 @@ def request_password_reset(
         # Prevent caching.
         response.headers["Cache-Control"] = "no-store"
 
-        request_password_reset_msg = "If the email exists, a reset link has been sent."
-
         # Get the user from their email.
         user = session.query(UserInternalModel).filter(
             UserInternalModel.email == payload.email
@@ -575,7 +592,9 @@ def request_password_reset(
         # Avoid saying the email wasn't found, revealing anything about the user 
         # database, and returning 404 or 400.
         if not user:
-            return PasswordResetRequestResponseSchema(message =  request_password_reset_msg)
+            return PasswordResetRequestResponseSchema(
+                message = AuthResponseMessages.RESET_LINK_SENT
+            )
 
         try:
             # Delete old password reset verification tokens for the user.
@@ -588,6 +607,7 @@ def request_password_reset(
 
         except Exception:
             session.rollback()
+
             safe_exception("Unexpected error during password reset request.")
 
         # Create a new password reset token.
@@ -601,6 +621,7 @@ def request_password_reset(
         safe_debug(f"DEV PASSWORD RESET TOKEN:{raw_token}")
 
         try:
+            # Commit the raw token added to the user by create_raw_verification_token.
             session.commit()
 
         except Exception:
@@ -610,7 +631,7 @@ def request_password_reset(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Failed to create verification token.",
+                detail = AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN,
             )
 
         if raw_token is not None:
@@ -620,13 +641,23 @@ def request_password_reset(
             except Exception:
                 safe_exception("Error sending password reset email.")
 
-        return PasswordResetRequestResponseSchema(message = request_password_reset_msg)
+        return PasswordResetRequestResponseSchema(
+            message = AuthResponseMessages.RESET_LINK_SENT
+        )
 
 
 @router.post(
     f"/{RESET_PASSWORD}", 
     status_code = status.HTTP_200_OK,
-    response_model = PasswordResetSubmissionResponseSchema
+    response_model = PasswordResetSubmissionResponseSchema,
+    summary = "Resets a user’s password using a one‑time password‑reset token.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Accepts a one-time password-reset token from the request body.\n"
+        "- Rejects tokens that are invalid, expired, or already used.\n"
+        "- Updates the user's password.\n"
+        "- Revokes all active sessions for the user after the reset.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def reset_password(
@@ -663,12 +694,7 @@ def reset_password(
             )
 
         # Check to see if the password reset verification token has expired.
-        expires_at = verification_token.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo = timezone.utc)
-
-        now = datetime.now(timezone.utc)
-        if expires_at < now:
+        if is_in_past(verification_token.expires_at):
             raise HTTPException(
                 status_code = status.HTTP_400_BAD_REQUEST,
                 detail = "This password reset link has expired."
@@ -687,6 +713,8 @@ def reset_password(
 
         # Validate password strength of the user's new password.
         validate_password_strength(payload.new_password)
+
+        now = datetime.now(timezone.utc)
 
         try:
             # Grab the unused password reset verification token. This should only
@@ -743,7 +771,7 @@ def reset_password(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "An unexpected error occurred while resetting the password."
+                detail = AuthResponseMessages.ERROR_RESETTING_PASSWORD
             )
 
         delete_auth_token_cookies(request, response)
@@ -775,7 +803,16 @@ def reset_password(
 @router.post(
     f"/{LOGIN}", 
     status_code = status.HTTP_200_OK,
-    response_model = LoginResponseSchema
+    response_model = LoginResponseSchema,
+    summary = "Authenticates a user, and issues access and refresh tokens.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Uses equal timing for valid and invalid logins to prevent enumeration.\n"
+        "- Rejects invalid email or password with a generic 401 response.\n"
+        "- Issues a new access token and refresh token on successful login.\n"
+        "- Stores the refresh token server-side as a session.\n"
+        "- Sets both tokens as HTTP-only cookies in the response.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def login(
@@ -799,14 +836,16 @@ def login(
         # by still calling verify password.
         if user:
             password_ok = verify_password(payload.password, user.hashed_password)
+
         else:
             verify_password(payload.password, DUMMY_PASSWORD_HASH)  # burn time
+
             password_ok = False
 
         if (not user) or (not password_ok):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid email or password."
+                detail = AuthResponseMessages.INVALID_EMAIL_PASSWORD
             )
 
         # Generate tokens.
@@ -836,18 +875,13 @@ def login(
 
         except Exception as exc:
             session.rollback()
+
             sentry_sdk.capture_exception(exc)
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Could not create session token."
+                detail = AuthResponseMessages.CANT_CREATE_SESSION_TOKEN
             ) from exc
-
-        # Determine cookie security based on environment. Allows us to ignore
-        # secure cookies, which do not work over http (we run locally over http and
-        # production over https).
-        hostname = request.url.hostname
-        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
 
         body = LoginResponseSchema(
             access_token = access_token,
@@ -859,28 +893,7 @@ def login(
         # Prevent caching
         response.headers["Cache-Control"] = "no-store"
 
-        # Set refresh token cookie. max_age is the number of seconds the browser 
-        # should hold on to this cookie. 7 days * (24 hrs / day) * (60 min / 1 hr) *
-        # (60 sec / min)
-        response.set_cookie(
-            key = "refresh_token",
-            value = raw_refresh_token,
-            httponly = True,
-            secure = not is_local,
-            samesite = SAME_SITE_VALUE,
-            path = "/",
-            max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
-        )
-
-        response.set_cookie(
-            key = "access_token",
-            value = access_token,
-            httponly = True,
-            secure = not is_local,
-            samesite = SAME_SITE_VALUE,
-            path = "/",
-            max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
-        )
+        set_auth_token_cookies(request, response, raw_refresh_token, access_token)
 
         return response
 
@@ -895,7 +908,15 @@ def login(
 @router.post(
     f"/{LOGOUT}",
     status_code = status.HTTP_200_OK,
-    response_model = LogoutResponseSchema
+    response_model = LogoutResponseSchema,
+    summary = "Logs the user out by revoking their refresh token and clearing auth cookies.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Clears access and refresh token cookies in all cases.\n"
+        "- Attempts to revoke the refresh token, if present.\n"
+        "- Returns 200, even if no refresh token cookie is found.\n"
+        "- On DB failure, cookies are still cleared and an error is returned.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def logout(
@@ -938,7 +959,7 @@ def logout(
 
                     error_response = JSONResponse(
                         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        content = {"detail": "Could not revoke session token."}
+                        content = {"detail": AuthResponseMessages.COULD_NOT_REVOKE_SESSION}
                     )
                     # Preserve Cache-Control and the cookie-deletion headers already set on
                     # the injected response object. Raising HTTPException here would
@@ -954,7 +975,14 @@ def logout(
 @router.post(
     f"/{LOGOUT_ALL}",
     status_code = status.HTTP_200_OK,
-    response_model = LogoutAllResponseSchema
+    response_model = LogoutAllResponseSchema,
+    summary = "Logs the user out of all devices by revoking all active sessions.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Clears access and refresh token cookies in all cases.\n"
+        "- Attempts to identify the user via the refresh token cookie.\n"
+        "- If no refresh token is present, logout still succeeds.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def logout_all(
@@ -978,7 +1006,7 @@ def logout_all(
             # Cookies may still exist even if raw_refresh_token is None.
             delete_auth_token_cookies(request, response)
 
-            return LogoutAllResponseSchema(message = "Logged out of all devices.")
+            return LogoutAllResponseSchema(message = AuthResponseMessages.LOGGED_OUT_ALL_DEVICES)
 
         # Otherwise, hash the refresh token and use it to get the session token for 
         # this session.
@@ -996,7 +1024,7 @@ def logout_all(
         if not session_token:
             delete_auth_token_cookies(request, response)
 
-            return LogoutAllResponseSchema(message = "Logged out of all devices.")
+            return LogoutAllResponseSchema(message = AuthResponseMessages.LOGGED_OUT_ALL_DEVICES)
 
         # Otherwise, we found a session. Since it has a user id, we can use it to revoke 
         # all sessions for this user.
@@ -1023,18 +1051,19 @@ def logout_all(
 
         except Exception as exc:
             session.rollback()
+
             sentry_sdk.capture_exception(exc)
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Could not revoke all session tokens."
+                detail = AuthResponseMessages.COULD_NOT_REVOKE_ALL_SESSIONS
             ) from exc
-
 
         delete_auth_token_cookies(request, response)
 
-        return LogoutAllResponseSchema(message = "Logged out of all devices.")
-    
+        return LogoutAllResponseSchema(message = AuthResponseMessages.LOGGED_OUT_ALL_DEVICES)
+
+
 # Postman test steps for testing active_sessions:
 #
 #     1. Follow the steps for testing login. 
@@ -1045,7 +1074,13 @@ def logout_all(
 @router.get(
     f"/{ACTIVE_SESSIONS}", 
     status_code = status.HTTP_200_OK,
-    response_model = ActiveSessionsResponseSchema
+    response_model = ActiveSessionsResponseSchema,
+    summary = "Returns all active sessions for the authenticated user.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Includes active sessions but not expired or revoked ones.\n"
+        "- Sessions are sorted by creation time, newest first.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def get_active_sessions(
@@ -1060,9 +1095,11 @@ def get_active_sessions(
         # Prevent caching.
         response.headers["Cache-Control"] = "no-store"
 
-        # Get all session tokens for this user and sort them using created_at.
+        # Get all active session tokens for this user and sort them using created_at.
         user_sessions = session.query(SessionTokenModel).filter(
-            SessionTokenModel.user_id == current_user.id
+            SessionTokenModel.user_id == current_user.id,
+            SessionTokenModel.revoked_at.is_(None),
+            SessionTokenModel.expires_at > datetime.now(timezone.utc)
         ).order_by(SessionTokenModel.created_at.desc()).all()
 
         # Convert the user_sessions to a ActiveSessionsResponse.
@@ -1096,7 +1133,14 @@ def get_active_sessions(
 @router.post(
     f"/{TERMINATE_SESSION}/{{session_id}}", 
     status_code = status.HTTP_200_OK,
-    response_model = TerminateSessionResponseSchema
+    response_model = TerminateSessionResponseSchema,
+    summary = "Revokes a specific session belonging to an authenticated user.",
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Revokes the session corresponding to session_id if it belongs to the user.\n"
+        "- Returns 404 if the session does not exist or is not theirs.\n"
+        "- Returns a success message if the session was already revoked.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def terminate_session(
@@ -1121,7 +1165,7 @@ def terminate_session(
         if not session_token:
             raise HTTPException(
                 status_code = status.HTTP_404_NOT_FOUND,
-                detail = "Session not found."
+                detail = AuthResponseMessages.SESSION_NOT_FOUND
             )
 
         try:
@@ -1144,7 +1188,7 @@ def terminate_session(
             # If we failed to update, assume it was already revoked.
             if updated == 0:
                 return TerminateSessionResponseSchema(
-                    message = "Session already terminated."
+                    message = AuthResponseMessages.SESSION_ALREADY_TERMINATED
                 )
 
             session.commit()
@@ -1156,10 +1200,12 @@ def terminate_session(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR, 
-                detail = "Failed to terminate session."
+                detail = AuthResponseMessages.FAILED_TERMINATE_SESSION
             ) from exc
 
-        return TerminateSessionResponseSchema(message = "Session terminated successfully.")
+        return TerminateSessionResponseSchema(message = 
+            AuthResponseMessages.SESSION_TERMINATED_SUCCESS
+        )
 
 
 # Postman test steps for testing refresh:
@@ -1171,7 +1217,19 @@ def terminate_session(
 @router.post(
     f"/{REFRESH}", 
     status_code = status.HTTP_200_OK,
-    response_model = RefreshResponseSchema
+    response_model = RefreshResponseSchema,
+    summary = (
+        "Rotates a refresh token and issues a new access token "
+        "when the refresh token is valid."
+    ),
+    description = (
+        "### Behavior and Side Effects\n"
+        "- Requires a valid refresh token cookie to issue new tokens.\n"
+        "- Rejects missing, invalid, expired, or stale refresh tokens.\n"
+        "- Detects malicious reuse and revokes all active sessions.\n"
+        "- Rotates the refresh token and returns a new access token.\n"
+        "- Sets both tokens as HTTP-only cookies in the response.\n"
+    )
 )
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def refresh_token(
@@ -1208,7 +1266,7 @@ def refresh_token(
         if not raw_refresh_token:
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Missing refresh token."
+                detail = AuthResponseMessages.MISSING_REFRESH_TOKEN
             )
 
         # Hash the raw opaque refresh token and look up the corresponding session and 
@@ -1222,21 +1280,17 @@ def refresh_token(
         if not session_token:
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid refresh token."
+                detail = AuthResponseMessages.INVALID_REFRESH_TOKEN
             )
 
         now = datetime.now(timezone.utc)
 
-        # Normalize times for SQLite (naive --> aware)
-        expires_at = session_token.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo = timezone.utc)
-
         # Make sure the refresh token isn't expired.
-        if expires_at < now:
+  
+        if is_in_past(session_token.expires_at):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Refresh token expired."
+                detail = AuthResponseMessages.REFRESH_TOKEN_EXPIRED
             )
 
         revoked_at = session_token.revoked_at
@@ -1255,7 +1309,7 @@ def refresh_token(
             if time_since_revocation <= CONCURRENT_REFRESH_GRACE_SECONDS:
                 raise HTTPException(
                     status_code = status.HTTP_401_UNAUTHORIZED,
-                    detail = "Refresh token expired or stale."
+                    detail = AuthResponseMessages.REFRESH_TOKEN_EXPIRED_STALE
                 )
  
             # If we reach here, the token was rotated outside the 
@@ -1274,7 +1328,7 @@ def refresh_token(
  
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED, 
-                detail = "Refresh token reuse detected. All sessions revoked."
+                detail = AuthResponseMessages.REUSE_DETECTED_SESSIONS_REVOKED
             )
 
         # If we make it here, assume no concurrency, staleness, or malicious intent. 
@@ -1305,7 +1359,7 @@ def refresh_token(
         if token_updated == 0:
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED, 
-                detail = "Refresh token expired."
+                detail = AuthResponseMessages.REFRESH_TOKEN_EXPIRED
             )
 
         # Create new session token with the new refresh token. Why? A new session 
@@ -1328,7 +1382,6 @@ def refresh_token(
         session.add(new_session_token)
         session.commit()
 
-        # Issue new access token
         user = session.query(UserInternalModel).filter(
             UserInternalModel.id == session_token.user_id
         ).first()
@@ -1336,15 +1389,11 @@ def refresh_token(
         if not user:
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "User no longer exists."
+                detail = AuthResponseMessages.USER_NO_LONGER_EXISTS
             )
 
         # Issue a new access token.
         new_access_token = create_access_token(str(user.id), user.is_verified)
-
-        # Set cookies.
-        hostname = request.url.hostname
-        is_local = hostname in ("localhost", "127.0.0.1", "testserver")
 
         body = RefreshResponseSchema(
             access_token = new_access_token,
@@ -1356,25 +1405,7 @@ def refresh_token(
         # Tell client not to cache anything about the response.
         response.headers["Cache-Control"] = "no-store"
 
-        response.set_cookie(
-            key = "refresh_token",
-            value = new_raw_refresh_token,
-            httponly = True,
-            secure = not is_local,
-            samesite = SAME_SITE_VALUE,
-            path = "/",
-            max_age = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 60 * 60
-        )
-
-        response.set_cookie(
-            key = "access_token",
-            value = new_access_token,
-            httponly = True,
-            secure = not is_local,
-            samesite = SAME_SITE_VALUE,
-            path = "/",
-            max_age = ACCESS_TOKEN_LIFETIME_MINUTES * 60
-        )
+        set_auth_token_cookies(request, response, new_raw_refresh_token, new_access_token)
 
         return response
     
@@ -1389,7 +1420,8 @@ def refresh_token(
 @router.get(
     f"/{ME}",
     status_code = status.HTTP_200_OK,
-    response_model = MeResponseSchema
+    response_model = MeResponseSchema,
+    summary = "Returns basic information about an authenticated user."
 )
 @rate_limiter.limit(LOW_RATE_LIMIT)
 def get_me(
@@ -1440,10 +1472,11 @@ def get_me(
 @router.get(
     f"/{EXPORT_USER_DATA}",
     status_code = status.HTTP_200_OK,
-    summary = "Export all user data",
+    summary = "Exports all data associated with an authenticated user as a downloadable file.",
     description = (
-        "Returns all data associated with the user, including profile, "
-        "sessions, verification tokens, and tea profile notes."
+        "### Behavior and Side Effects\n"
+        "- Requires a fresh login before exporting user data.\n"
+        "- Provides the data as a compressed file download.\n"
     )
 )
 @rate_limiter.limit(LOWEST_RATE_LIMIT)
@@ -1455,7 +1488,7 @@ def export_user_data(
     with sentry_sdk.start_span(op = AUTH, name = "export_user_data"):
         sentry_sdk.set_tag("endpoint", "export_user_data")
 
-        _require_fresh_login(current_user)
+        _require_fresh_login(current_user, "Please log in again before exporting your data.")
 
         # Instantiate repos.
         user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
@@ -1470,8 +1503,7 @@ def export_user_data(
         dsar_log_id = dsar_log.id
 
         # Commit right away so that if something else fails, these logs will not be
-        # rolled back. This is one of the few times we want multiple commits in an 
-        # endpoint.
+        # rolled back. One of the few times we do not want a try-except + rollback.
         session.commit()  
 
         # Instantiate service.
@@ -1515,7 +1547,7 @@ def export_user_data(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Failed to export user data.",
+                detail = AuthResponseMessages.FAILED_EXPORT_USER_DATA,
             )
 
 
@@ -1528,11 +1560,12 @@ def export_user_data(
 @router.delete(
     f"/{DELETE_USER_DATA}",
     status_code = status.HTTP_204_NO_CONTENT,
-    summary = "Delete all user-generated data",
+    summary = "Delete all user-generated data.",
     description = (
-        "Deletes all user-generated data associated with their account, including "
-        "tea profile notes, session tokens, and verification tokens. "
-        "The user account itself is preserved."
+        "### Behavior and Side Effects\n"
+        "- Requires a fresh login before deleting user-generated data.\n"
+        "- Deletes all data created by the user but preserves the account.\n"
+        "- Returns 204 on successful deletion.\n"
     )
 )
 @rate_limiter.limit(LOWEST_RATE_LIMIT)
@@ -1544,7 +1577,7 @@ def delete_user_data(
     with sentry_sdk.start_span(op = AUTH, name = "delete_user_data"):
         sentry_sdk.set_tag("endpoint", "delete_user_data")
 
-        _require_fresh_login(current_user)
+        _require_fresh_login(current_user, "Please log in again before deleting your data.")
 
         # Instantiate repos.
         user_tea_profile_notes_repo = UserTeaProfileNotesRepository(session)
@@ -1559,8 +1592,7 @@ def delete_user_data(
         dsar_log_id = dsar_log.id
 
         # Commit right away so that if something else fails, these logs will not be
-        # rolled back. This is one of the few times we want multiple commits in an 
-        # endpoint.
+        # rolled back. One of the few times we do not want a try-except + rollback.
         session.commit()  
 
         # Instantiate service.
@@ -1587,7 +1619,7 @@ def delete_user_data(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Failed to delete user data.",
+                detail = AuthResponseMessages.FAILED_TO_DELETE_USER_DATA,
             )
 
 
@@ -1600,11 +1632,12 @@ def delete_user_data(
 @router.delete(
     f"/{DELETE_USER_ACCOUNT}",
     status_code = status.HTTP_204_NO_CONTENT,
-    summary = "Delete user account and all associated data",
+    summary = "Irreversibly deletes a user account and all associated data.",
     description = (
-        "Deletes the user account and all associated data, including profile, "
-        "sessions, verification tokens, and tea profile notes. "
-        "This action is irreversible."
+        "### Behavior and Side Effects\n"
+        "- Requires a fresh login before deleting the account.\n"
+        "- Requires recent password confirmation.\n"
+        "- Returns 204 on successful deletion.\n"
     )
 )
 @rate_limiter.limit(LOWEST_RATE_LIMIT)
@@ -1616,14 +1649,14 @@ def delete_user_account(
     with sentry_sdk.start_span(op = AUTH, name = "delete_user_account"):
         sentry_sdk.set_tag("endpoint", "delete_user_account")
 
-        _require_fresh_login(current_user)
+        _require_fresh_login(current_user, "Please log in again before deleting your account.")
 
         # Require recent password confirmation.
         password_confirmation_repo = PasswordConfirmationRepository(session)
         if not password_confirmation_repo.is_confirmation_valid(current_user.id):
             raise HTTPException(
                 status_code = status.HTTP_403_FORBIDDEN,
-                detail = "Password confirmation required."
+                detail = AuthResponseMessages.PASSWORD_CONFIRM_REQ
             )
 
         # Instantiate repos.
@@ -1656,6 +1689,12 @@ def delete_user_account(
 
             session.commit()
 
+            # Note: We intentionally do NOT clear auth cookies here.
+            # Once the user account is deleted, any remaining cookies become invalid
+            # because authentication will fail on the next request. The frontend is
+            # responsible for clearing client-side cookies after account deletion.
+            # This avoids redundant cookie writes and keeps the endpoint minimal.
+
             return Response(status_code = status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
@@ -1667,7 +1706,7 @@ def delete_user_account(
 
             raise HTTPException(
                 status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail = "Failed to delete user account.",
+                detail = AuthResponseMessages.FAILED_TO_DELETE_ACCOUNT,
             )
 
 # Postman test steps for confirming password:
@@ -1680,10 +1719,15 @@ def delete_user_account(
 @router.post(
     f"/{CONFIRM_PASSWORD}",
     status_code = status.HTTP_204_NO_CONTENT,
-    summary = "Confirm password for high-risk actions",
+    summary = (
+        "Verifies the user’s password and records a "
+        "short‑lived confirmation for high‑risk actions."
+    ),
     description = (
-        "Verifies the user's password and records a short-lived confirmation "
-        "allowing high-risk actions such as account deletion."
+        "### Behavior and Side Effects\n"
+        "- Requires a fresh login before confirming the password.\n"
+        "- Records a short-lived confirmation used for actions like account deletion.\n"
+        "- Returns 204 on successful confirmation.\n"
     )
 )
 @rate_limiter.limit(LOWEST_RATE_LIMIT)
@@ -1696,22 +1740,34 @@ def confirm_password(
     with sentry_sdk.start_span(op = AUTH, name = "confirm_password"):
         sentry_sdk.set_tag("endpoint", "confirm_password")
 
-        _require_fresh_login(current_user)
+        _require_fresh_login(current_user, "Please log in again.")
 
         # Validate password.
         if not verify_password(payload.password, current_user.hashed_password):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = "Invalid password."
+                detail = AuthResponseMessages.INVALID_PASSWORD
             )
 
-        # Instantiate repo.
-        password_confirmation_repo = PasswordConfirmationRepository(session)
+        try:
+            # Instantiate repo.
+            password_confirmation_repo = PasswordConfirmationRepository(session)
 
-        # Create confirmation entry.
-        password_confirmation_repo.create_confirmation(user_id = current_user.id)
+            # Create confirmation entry.
+            password_confirmation_repo.create_confirmation(user_id = current_user.id)
 
-        # Commit immediately so confirmation is durable.
-        session.commit()
+            # Commit immediately so confirmation is durable.
+            session.commit()
+
+        except Exception as exc:
+            session.rollback()
+
+            sentry_sdk.capture_exception(exc)
+
+            raise HTTPException(
+                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail = AuthResponseMessages.FAILED_TO_CONFIRM_PASSWORD
+            )
 
         return Response(status_code = status.HTTP_204_NO_CONTENT)
+    
