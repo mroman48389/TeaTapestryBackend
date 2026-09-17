@@ -121,27 +121,3 @@ class TeaProfilesRepository:
                 "Failed to list tea profiles",
                 details = {"filters": filters, "limit": limit, "offset": offset},
             ) from exc
-
-    # later, once the user can add their own tea profiles: 
-    
-    # Create a new tea profile.
-    # def create(self, obj_in: TeaProfileModel) -> TeaProfileModel:
-    #     try:
-    #         self._session.add(obj_in)
-    #         self._session.commit()
-    #         self._session.refresh(obj_in)
-    #         return obj_in
-        
-    #     except IntegrityError as exc:
-    #         self._session.rollback()
-    #         raise TeaProfileConflictError(
-    #             "Tea profile conflicts with existing data",
-    #             details={"name": getattr(obj_in, "name", None)},
-    #         ) from exc
-        
-    #     except SQLAlchemyError as exc:
-    #         self._session.rollback()
-    #         raise TeaProfileQueryError(
-    #             "Failed to create tea profile",
-    #             details={"name": getattr(obj_in, "name", None)},
-    #         ) from exc

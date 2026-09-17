@@ -90,6 +90,7 @@ def create_user_tea_profile_notes(
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "create_user_tea_profile_notes"):
+
         try:
             notes = service.create(current_user.id, tea_profile_id, inbound_schema)
 
@@ -102,7 +103,9 @@ def create_user_tea_profile_notes(
         
         except Exception:
             session.rollback()
+
             raise
+
 
 @router.patch(
     "/{note_id}",
@@ -121,6 +124,7 @@ def update_user_tea_profile_notes(
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "update_user_tea_profile_notes"):
+
         try:
             updated_notes = service.update(current_user.id, note_id, inbound_schema)
 
@@ -128,9 +132,11 @@ def update_user_tea_profile_notes(
 
             return updated_notes
         
-        except:
+        except Exception:
             session.rollback()
+
             raise
+
 
 @router.delete(
     "/{note_id}",
@@ -154,6 +160,7 @@ def delete_user_tea_profile_notes(
 
             return None
 
-        except:
+        except Exception:
             session.rollback()
+            
             raise

@@ -54,6 +54,7 @@ class UserTeaProfileNotesRepository:
             return user_tea_profile_notes
 
         except SQLAlchemyError as exc: # pragma: no cover
+
             raise UserTeaProfileNotesQueryError(
                 "Failed to fetch user tea profile notes.",
                 details = {"note_id": note_id},
@@ -96,6 +97,7 @@ class UserTeaProfileNotesRepository:
             return user_tea_profile_notes
         
         except SQLAlchemyError as exc: # pragma: no cover
+            
             raise UserTeaProfileNotesQueryError(
                 "Failed to fetch user tea profile notes.",
                 details = {
@@ -126,6 +128,7 @@ class UserTeaProfileNotesRepository:
                     "user_id": user_id,
                 },
             ) from exc
+        
     
     # Create a new row of user tea profile notes.
     def create(
@@ -174,11 +177,11 @@ class UserTeaProfileNotesRepository:
             return user_tea_profile_notes
 
         except UserTeaProfileNotesAlreadyExistError:
+
             # Let the service layer handle this.
             raise
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to create user tea profile notes.",
@@ -187,6 +190,7 @@ class UserTeaProfileNotesRepository:
                     "tea_profile_id": tea_profile_id,
                 },
             ) from exc
+        
 
     # Update an existing row of user tea profile notes.
     def update(
@@ -210,7 +214,6 @@ class UserTeaProfileNotesRepository:
             return user_tea_profile_notes
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to update user tea profile notes.",
@@ -232,12 +235,12 @@ class UserTeaProfileNotesRepository:
             self.session.delete(user_tea_profile_notes)
 
         except SQLAlchemyError as exc: # pragma: no cover
-            self.session.rollback()
 
             raise UserTeaProfileNotesQueryError(
                 "Failed to delete user tea profile notes.",
                 details = {"note_id": note_id},
             ) from exc
+
 
     def delete_by_user_id(self, user_id: UUID) -> None:
 
@@ -247,5 +250,3 @@ class UserTeaProfileNotesRepository:
                 UserTeaProfileNotesModel.user_id == user_id
             )
         )
-
-        

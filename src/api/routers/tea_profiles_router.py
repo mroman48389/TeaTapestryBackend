@@ -7,6 +7,8 @@ from typing import List, get_origin, get_args, Union, cast, Any
 from datetime import datetime, timezone
 import sentry_sdk
 from starlette import status
+import hashlib
+import json
 
 from src.utils.session_utils import get_session
 from src.api.schemas.tea_profiles_schema import TeaProfileSchema, TeaProfileFilters
@@ -33,23 +35,9 @@ router = APIRouter(prefix = TEA_PROFILES_PREFIX, tags = ["tea_profiles"])
 def get_tea_profile_filters(request: Request) -> TeaProfileFilters: # type: ignore
     params = {}
 
-    # for field_name, field_info in TeaProfileFilters.model_fields.items():
-    #     # See if the field from the TeaProfileFilters schema exists in the 
-    #     # dictionary-like object containing every parameter after the ? in the
-    #     # URL.
-    #     value = request.query_params.get(field_name)
-
-    #     # If it was found, add it to the params dict we're building.
-    #     if value is not None:
-    #         # Handle list types first. Split on commas.
-    #         if get_origin(field_info.annotation) is list:
-    #             # Normalize into a Python list
-    #             params[field_name] = [v.strip() for v in value.split(",")]
-    #         else:
-    #             params[field_name] = value
-
     for field_name, field_info in TeaProfileFilters.model_fields.items():
         value = request.query_params.get(field_name)
+
         if value is not None:
             origin = get_origin(field_info.annotation)
             args = get_args(field_info.annotation)
@@ -90,13 +78,64 @@ async def _get_tea_profiles_common(
         # so they are typically params we pass in. They should reflect the things for
         # which performance, caching, and behavior may vary. Since these are indexed
         # by Sentry, we want high-value, low cardinality meaningful tags.
+        #
+        # This will let us search and aggregate queries in Sentry such as:
+        #
+        #     endpoint = tea_profiles
+        #     limit = 100
+        #     offset = 0
+        #     has_filters = True
+        #     filter_count = 3
+        #
         sentry_sdk.set_tag("endpoint", "tea_profiles")
         sentry_sdk.set_tag("limit", limit)
         sentry_sdk.set_tag("offset", offset)
-        sentry_sdk.set_tag("filters", str(filters_dict))
+        sentry_sdk.set_tag("has_filters", bool(filters_dict))
+        sentry_sdk.set_tag("filter_count", len(filters_dict))
+
+        # Use set_context to attach JSON-like data to traces. This is good for things
+        # with high cardinality that we don't want to index. This will, for example,
+        # give us debug details when drilling into a trace on Sentry such as:
+        #
+        #     {
+        #       "country_of_origin": "China",
+        #       "tea_type": "green",
+        #       "liquor_taste": ["chestnut"],
+        #       ...
+        #     }
+        sentry_sdk.set_context(
+            "filters",
+            filters_dict
+        )
 
         # Build cache
-        cache_key = f"tea_profiles:list:{filters_dict}:{limit}:{offset}"
+        #
+        # Serialize the request parameters into canonical JSON. This ensures that 
+        # logically identical filter sets always produce the same cache key 
+        # regardless of dictionary ordering. For example,
+        #
+        #     {"tea_type": "green", "country_of_origin": "China"}
+        #
+        # and
+        #
+        #     {"country_of_origin": "China", "tea_type": "green"}
+        #
+        # represent the same query and should therefore share a cache entry.
+        #
+        # Hash the result to keep cache keys compact.
+        #
+        cache_payload = {
+            "filters": filters_dict,
+            "limit": limit,
+            "offset": offset,
+        }
+
+        cache_key = (
+            "tea_profiles:list:"
+            + hashlib.sha256(
+                json.dumps(cache_payload, sort_keys = True).encode("utf-8")
+            ).hexdigest()
+        )
 
         with sentry_sdk.start_span(op = "cache", name = "cache lookup"):
             # Try to get tea profiles from cache first.
@@ -196,6 +235,7 @@ async def _get_tea_profiles_common(
             return Response(status_code = status.HTTP_200_OK, headers = dict(response.headers))
         else:
             return cached_value # pragma: no cover
+
 
 # Depends is FastAPI's dependency injection system. It allows us to call the 
 # get_session context manager without needing to use a "with" statement or
@@ -353,6 +393,25 @@ async def _get_tea_profile_common(
 
         if inm == etag:
             return Response(status_code = status.HTTP_304_NOT_MODIFIED) # pragma: no cover
+
+        # Apply If-Modified-Since validation so conditional requests behave 
+        # the same way regardless of whether the response came from the cache 
+        # or required a database fetch. Without this check, a cold-cache request 
+        # may return 200 OK while an equivalent warm-cache request correctly 
+        # returns 304 Not Modified.
+        ims = request.headers.get("if-modified-since")
+
+        if ims:
+            try: # pragma: no cover
+                ims_dt = datetime.strptime(
+                    ims, "%a, %d %b %Y %H:%M:%S GMT"
+                ).replace(tzinfo = timezone.utc)
+
+                if ims_dt >= last_modified.replace(microsecond = 0):
+                    return Response(status_code = status.HTTP_304_NOT_MODIFIED)
+
+            except ValueError: # pragma: no cover
+                pass
 
         response.headers["ETag"] = etag
         response.headers["Last-Modified"] = http_date(last_modified)
