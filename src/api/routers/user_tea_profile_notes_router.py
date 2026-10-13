@@ -149,11 +149,11 @@ def delete_user_tea_profile_notes(
     current_user: UserInternalModel = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    # Delete existing user tea profile notes.
     service = _get_service(session)
 
     with sentry_sdk.start_span(op = "endpoint", name = "delete_user_tea_profile_notes"):
         try:
+            # Delete existing user tea profile notes.
             service.delete(current_user.id, note_id)
 
             session.commit()

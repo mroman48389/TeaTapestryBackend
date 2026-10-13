@@ -81,7 +81,9 @@ from src.utils.auth.jwt_utils import (
     create_access_token
 )
 from src.utils.auth.token_utils import (
-    create_raw_verification_token,
+    create_raw_verification_token
+)
+from src.utils.auth.email_utils import (
     send_verification_email,
     send_password_reset_email
 )
@@ -103,9 +105,8 @@ from src.db.models.auth.verification_token_model import VerificationTokenModel
 
 # Schema
 
-from src.api.schemas.auth.user_schema import (
-    UserInboundSchema,
-    UserOutboundSchema,
+from src.api.schemas.auth.signup_schema import (
+    SignupSchema
 )
 from src.api.schemas.auth.login_schema import (
     LoginSchema,
@@ -133,6 +134,7 @@ from src.api.schemas.auth.email_verification_schema import (
 from src.api.schemas.auth.refresh_schema import RefreshResponseSchema
 from src.api.schemas.auth.me_schema import MeResponseSchema
 from src.api.schemas.auth.confirm_password_schema import ConfirmPasswordInboundSchema
+from src.api.schemas.auth.user_schema import UserResponseSchema
 
 
 # Services
@@ -192,7 +194,7 @@ def _require_fresh_login(current_user: UserInternalModel, error_msg: str):
 #
 @router.post(
     f"/{SIGNUP}", 
-    response_model = UserOutboundSchema, 
+    response_model = UserResponseSchema, 
     status_code = status.HTTP_201_CREATED,
     summary = "Registers a new user.",
     description = (
@@ -207,7 +209,7 @@ def _require_fresh_login(current_user: UserInternalModel, error_msg: str):
 @rate_limiter.limit(VERY_LOW_RATE_LIMIT)
 def signup(
     request: Request,
-    payload: UserInboundSchema, 
+    payload: SignupSchema, 
     response: Response,
     session: Session = Depends(get_session)
 ):
@@ -302,6 +304,8 @@ def signup(
         # We still want to return the user if something went wrong with the verification
         # token and we don't send the verification email.
         if raw_token is None:
+            # FastAPI will keep only those fields in UserInternalModel that are
+            # also in UserResponseSchema.
             return new_user
 
         try:
@@ -327,9 +331,8 @@ def signup(
         except Exception:
             safe_exception("Error sending verification email during signup.")
 
-        # Return the UserOutboundSchema (FastAPI will take the relevant fields from
-        # the UserInboundSchema and serialize it into a UserOutboundSchema because
-        # of the response_model we set).
+        # FastAPI will keep only those fields in UserInternalModel that are
+        # also in UserResponseSchema.
         return new_user
 
 
@@ -1420,7 +1423,7 @@ def refresh_token(
 @router.get(
     f"/{ME}",
     status_code = status.HTTP_200_OK,
-    response_model = MeResponseSchema,
+    response_model = UserResponseSchema,
     summary = "Returns basic information about an authenticated user."
 )
 @rate_limiter.limit(LOW_RATE_LIMIT)
@@ -1431,16 +1434,9 @@ def get_me(
     with sentry_sdk.start_span(op = AUTH, name = "get_me"):
         sentry_sdk.set_tag("endpoint", "get_me")
 
-        # Protected route that returns information about the 
-        # currently authenticated user, based on the access token cookie.
-        # The frontend does not store tokens; the browser sends cookies 
-        # automatically, and the backend derives identity from them.
-
-        return MeResponseSchema(
-            id = current_user.id,
-            email = current_user.email,
-            created_at = current_user.created_at
-        )
+        # FastAPI will keep only those fields in UserInternalModel that are
+        # also in UserResponseSchema.
+        return current_user
 
 
 # Postman test steps for testing export user data:

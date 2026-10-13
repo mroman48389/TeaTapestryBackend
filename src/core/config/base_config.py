@@ -39,3 +39,6 @@ class BaseConfig(BaseSettings):
     # Supabase
     supabase_url: Optional[str] = Field(None, alias="SUPABASE_URL")
     supabase_service_role_key: Optional[str] = Field(None, alias="SUPABASE_SERVICE_ROLE_KEY")
+
+    # Resend
+    resend_api_key: Optional[str] = Field(None, alias="RESEND_API_KEY")
