@@ -1705,6 +1705,7 @@ def delete_user_account(
                 detail = AuthResponseMessages.FAILED_TO_DELETE_ACCOUNT,
             )
 
+
 # Postman test steps for confirming password:
 #
 #     1. Follow the steps for testing login. You may want to make a new user for this.

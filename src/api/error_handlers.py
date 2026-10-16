@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 from uuid import uuid4
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette import status
 from sentry_sdk import set_context
@@ -86,6 +86,22 @@ def _error_response(
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Register all API-level exception handlers on the FastAPI app."""
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+
+        request_id = _get_request_id(request)
+        set_context("request", {"request_id": request_id})
+
+        return _error_response(
+            request = request,
+            exc_type = "HttpException",
+            message = str(exc.detail),
+            status_code = exc.status_code,
+            details = None,
+        )
 
     @app.exception_handler(TeaProfileNotFoundError)
     async def tea_profile_not_found_handler(
