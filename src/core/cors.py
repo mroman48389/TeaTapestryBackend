@@ -3,6 +3,9 @@ from fastapi import FastAPI
 
 from src.core.config import settings
 
+# For expose_headers, "ETag" and "Last-Modified" are important for 
+# caching and "Content-Disposition" is needed to include the file name
+# for the export user data endpoint.
 def configure_cors(app: FastAPI):
     app.add_middleware(
         CORSMiddleware,
@@ -10,5 +13,5 @@ def configure_cors(app: FastAPI):
         allow_credentials = True,
         allow_methods = ["*"],
         allow_headers = ["*"],
-        expose_headers=["ETag", "Last-Modified"],  # important for caching
+        expose_headers = ["ETag", "Last-Modified", "Content-Disposition"],
     )

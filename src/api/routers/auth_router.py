@@ -1727,7 +1727,7 @@ def delete_user_account(
         "- Returns 204 on successful confirmation.\n"
     )
 )
-@rate_limiter.limit(LOWEST_RATE_LIMIT)
+@rate_limiter.limit(LOW_RATE_LIMIT)
 def confirm_password(
     request: Request,
     payload: ConfirmPasswordInboundSchema,

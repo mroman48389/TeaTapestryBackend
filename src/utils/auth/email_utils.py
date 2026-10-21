@@ -137,9 +137,11 @@ def send_password_reset_email(user: UserInternalModel, raw_token: str):
 
 def send_email(to_email: str, subject: str, html: str):
     try:
+        # We can only change "from": "onboarding@resend.dev" because we now have the
+        # teatapestry.com domain. 
         response = resend.Emails.send(
             {
-                "from": "onboarding@resend.dev",
+                "from": "Tea Tapestry <noreply@notifications.teatapestry.com>",
                 "to": [to_email],
                 "subject": subject,
                 "html": html,
