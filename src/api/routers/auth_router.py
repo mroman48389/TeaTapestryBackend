@@ -231,6 +231,9 @@ def signup(
 
         validate_password_strength(payload.password)
 
+        username = payload.username.lower().strip()
+        display_name = payload.display_name.strip()
+
         # The email format is already validated by EmailStr in UserInboundSchema, so 
         # check if the entered email exists already next. EmailStr checks things like
         # the presence of the @ symbol, valid domain, etc.
@@ -244,6 +247,16 @@ def signup(
                 detail = AuthResponseMessages.EMAIL_ALREADY_EXISTS 
             )
 
+        existing_user = session.query(UserInternalModel).filter(
+            UserInternalModel.username == username
+        ).first()
+
+        if existing_user:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = AuthResponseMessages.USERNAME_ALREADY_EXISTS 
+            )
+
         # Hash the password.
         hashed_pw = hash_password(payload.password)
 
@@ -251,7 +264,8 @@ def signup(
         new_user = UserInternalModel(
             email = payload.email,
             hashed_password = hashed_pw,
-            display_name = payload.display_name,
+            display_name = display_name,
+            username = username
         )
 
         try:
@@ -267,7 +281,7 @@ def signup(
 
             raise HTTPException(
                 status_code = status.HTTP_400_BAD_REQUEST,
-                detail = AuthResponseMessages.EMAIL_ALREADY_EXISTS 
+                detail = AuthResponseMessages.EMAIL_OR_USERNAME_ALREADY_EXISTS 
             )
         
         except Exception:
@@ -962,8 +976,17 @@ def logout(
 
                     error_response = JSONResponse(
                         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        content = {"detail": AuthResponseMessages.COULD_NOT_REVOKE_SESSION}
+                        content = {
+                            "error": {
+                                "type": "InternalServerError",
+                                "message": AuthResponseMessages.COULD_NOT_REVOKE_SESSION,
+                                "details": None,
+                                "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                "path": str(request.url.path),
+                            }
+                        }
                     )
+
                     # Preserve Cache-Control and the cookie-deletion headers already set on
                     # the injected response object. Raising HTTPException here would
                     # otherwise discard them, since FastAPI's default exception handler

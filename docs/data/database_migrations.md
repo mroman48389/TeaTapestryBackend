@@ -6,7 +6,7 @@
 >
 >       to create a backup or, in pgAdmin, go to
 >
->           Servers --> PostgreSQL 18 --> Databases --> [database name] --> right-click --> Backup... 
+>           Servers --> [Server name] --> Databases --> [database name] --> right-click --> Backup... 
 >
 >       and enter the full path to where you'd like to save the backup.
 >

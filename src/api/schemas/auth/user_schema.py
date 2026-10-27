@@ -4,15 +4,33 @@ from uuid import UUID
 
 # Break up the user information into several schema for security and transparency.
 
-# NOT exposed to the client. Corresponds to UserModel. Internal backend representation of a user. 
+# NOT exposed to the client. Corresponds to UserInternalModel. Internal backend representation of a user. 
 class UserSchema(BaseModel):
     id: UUID
     email: EmailStr
+    # display_name does not have to be unique. Allow letters, numbers, hyphens, whitespace. 
+    # Used to identify the user in UI  such as the app bar, user profile display, 
+    # comments, reviews, chatting.
     display_name: str = Field(
         min_length = 1,
         max_length = 30,
         pattern = r"^[A-Za-z0-9\-\s]+$"
     )
+    # username must be unique. Allows lowercase letters, numbers, underscores, hyphens. Normalized and 
+    # stored as all lowercase. It will be used for looking up users, querying databases, URLs, mentions.
+    username: str = Field(
+        min_length = 3,
+        max_length = 30,
+        pattern = r"^[a-z0-9_-]+$"
+    )
+    bio: str | None = Field(
+        default = None,
+        max_length = 500
+    )
+    # Reference to where the avatar image is stored. (Currently, we automatically generate
+    # initials instead. If we implement this in the future, we need a way of preventing
+    # inappropriate image uploads and / or reporting such things).
+    avatar_url: str | None = None
 
     hashed_password: str
     created_at: datetime
@@ -39,7 +57,16 @@ class UserResponseSchema(BaseModel):
         max_length = 30,
         pattern = r"^[A-Za-z0-9\-\s]+$"
     )
+    username: str = Field( 
+        min_length = 3,
+        max_length = 30,
+        pattern = r"^[a-z0-9_-]+$"
+    )
+    bio: str | None = None
+    avatar_url: str | None = None
+
     created_at: datetime
+    is_verified: bool
     verified_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes = True)

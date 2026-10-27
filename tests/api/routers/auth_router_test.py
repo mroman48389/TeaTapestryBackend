@@ -57,7 +57,8 @@ from src.utils.auth.jwt_utils import (
     decode_access_token
 )
 from tests.utils.test_utils import (
-    fake_create_token_factory
+    fake_create_token_factory,
+    assert_error_message
 )
 from src.utils.auth.jwt_utils import create_refresh_token
 from src.api.routers.auth_router import DUMMY_PASSWORD_HASH
@@ -70,13 +71,14 @@ from src.utils.time_utils import is_in_future, is_in_past
 
 class TestAuthSignup:
 
-    def test_signup_creates_user(self, client, create_test_db):
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
+    def test_signup_creates_user(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
 
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         assert signup_response.status_code == status.HTTP_201_CREATED
@@ -87,6 +89,7 @@ class TestAuthSignup:
         assert "created_at" in signup_data
         assert signup_data["email"] == signup_payload["email"]
         assert signup_data["display_name"] == signup_payload["display_name"]
+        assert signup_data["username"] == signup_payload["username"]
 
         # Sensitive fields must not leak.
         assert "password" not in signup_data
@@ -126,12 +129,14 @@ class TestAuthSignup:
     # Note that we need the create_test_db fixture even though we're not using it in 
     # the body of the test because the client fixture overrides FastAPI's get_session 
     # dependency. If we don't include it, the test database will not exist.
-    def test_signup_duplicate_email_rejected(self, client, create_test_db):
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
+    def test_signup_duplicate_email_rejected(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
+
+        signup_payload = signup_payload_factory()
 
         # Sign up once.
         first_signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
@@ -141,10 +146,22 @@ class TestAuthSignup:
         second_signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         assert second_signup_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "already exists" in second_signup_response.json()["detail"]
+        assert_error_message(
+            second_signup_response, 
+            AuthResponseMessages.EMAIL_ALREADY_EXISTS
+        )
 
 
-    def test_signup_integrity_error(self, monkeypatch, client, create_test_db):
+    def test_signup_integrity_error(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
+
+        signup_payload = signup_payload_factory()
+
         # Patch the commit method of the Session class so all session instances fail.
         def raise_integrity_error(*args, **kwargs):
             raise IntegrityError(
@@ -155,16 +172,13 @@ class TestAuthSignup:
 
         monkeypatch.setattr(Session, "commit", raise_integrity_error)
 
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         assert signup_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert signup_response.json()["detail"] == AuthResponseMessages.EMAIL_ALREADY_EXISTS 
+        assert_error_message(
+            signup_response, 
+            AuthResponseMessages.EMAIL_OR_USERNAME_ALREADY_EXISTS
+        )
 
         # Ensure no user was created.
         user = create_test_db.query(UserInternalModel).filter_by(
@@ -179,13 +193,14 @@ class TestAuthSignup:
         assert verification_token is None
 
 
-    def test_signup_hashes_password(self, client, create_test_db):
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
+    def test_signup_hashes_password(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
 
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         assert signup_response.status_code == status.HTTP_201_CREATED
@@ -211,14 +226,16 @@ class TestAuthSignup:
         assert verify_password(signup_payload["password"], user.hashed_password)
 
 
-    def test_signup_creates_verification_token(self, client, create_test_db):
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
+    def test_signup_creates_verification_token(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
 
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -258,19 +275,22 @@ class TestAuthSignup:
         assert is_in_future(verification_token.expires_at)
 
 
-    def test_signup_raw_token_none(self, monkeypatch, client, create_test_db):
+    def test_signup_raw_token_none(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
+
+        signup_payload = signup_payload_factory()
+
         # patch create_raw_verification_token where it is used. Force the raw_token to
         # have a value of None.
         monkeypatch.setattr(
             "src.api.routers.auth_router.create_raw_verification_token", 
             lambda *args, **kwargs: None
         )
-
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
 
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
@@ -299,15 +319,17 @@ class TestAuthSignup:
 
 class TestAuthSendVerification:
 
-    def test_send_verification_resend_creates_new_token(self, client, create_test_db):
-        # Sign up a user.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
+    def test_send_verification_resend_creates_new_token(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
 
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -365,16 +387,13 @@ class TestAuthSendVerification:
         self, 
         monkeypatch, 
         client, 
-        create_test_db
+        create_test_db, 
+        signup_payload_factory
     ):
         # Sign up a user.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -427,15 +446,16 @@ class TestAuthSendVerification:
         assert send_verification_response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-    def test_send_verification_user_already_verified(self, client, create_test_db):
+    def test_send_verification_user_already_verified(
+        self, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
         # Sign up a user.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -463,19 +483,22 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert send_verification_response.json()["detail"] == (
+        assert_error_message(
+            send_verification_response, 
             AuthResponseMessages.EMAIL_ALREADY_VERIF
         )
 
-    def test_send_verification_token_deletion_failure(self, monkeypatch, client, create_test_db):
+    def test_send_verification_token_deletion_failure(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
         # Create and authenticate user.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
+        signup_payload = signup_payload_factory()
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -502,7 +525,8 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert send_verification_response.json()["detail"] == (
+        assert_error_message(
+            send_verification_response, 
             AuthResponseMessages.ERROR_PREP_VERIF_TOKEN
         )
 
@@ -514,14 +538,15 @@ class TestAuthSendVerification:
         assert len(remaining_tokens) == 1 
 
 
-    def test_send_verification_token_commit_failure(self, monkeypatch, client, create_test_db):
-        # Create and authenticate user.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
+    def test_send_verification_token_commit_failure(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
+        # Create and authenticate a user.
+        signup_payload = signup_payload_factory()
         client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
         login_payload = {
@@ -553,11 +578,22 @@ class TestAuthSendVerification:
         send_verification_response = client.post(AUTH_SEND_VERIFICATION_PREFIX, headers = headers)
 
         assert send_verification_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert send_verification_response.json()["detail"] == (
-            AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN 
+        assert_error_message(
+            send_verification_response, 
+            AuthResponseMessages.FAILED_TO_CREATE_VERIF_TOKEN
         )
 
-    def test_send_verification_email_failure(self, monkeypatch, client, create_test_db):
+
+    def test_send_verification_email_failure(
+        self, 
+        monkeypatch, 
+        client, 
+        create_test_db, 
+        signup_payload_factory
+    ):
+        # Create and authenticate a user.
+        signup_payload = signup_payload_factory()
+
         # Patch email sending to fail. You can't normally raise an error with a lambda
         # function, so use "(_ for _ in ())" to create an empty generator, which has a
         # .throw() method that raises an exception.
@@ -565,13 +601,6 @@ class TestAuthSendVerification:
             "src.api.routers.auth_router.send_verification_email",
             lambda *args, **kwargs: (_ for _ in ()).throw(Exception("email failure"))
         )
-
-        # Create and authenticate user.
-        signup_payload = {
-            "email": "emailFail@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "User"
-        }
 
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
         assert signup_response.status_code == status.HTTP_201_CREATED
@@ -610,7 +639,16 @@ class TestAuthSendVerification:
 
 class TestAuthVerifyEmail:
 
-    def test_verify_email_success(self, client, create_test_db, monkeypatch):
+    def test_verify_email_success(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch, 
+        signup_payload_factory
+    ):
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
+
         # monkeypatch token creation so signup uses a known raw token. The real 
         # function generates random tokens and stores only hashes, making them 
         # impossible to retrieve in tests. We need the raw verification token
@@ -620,14 +658,8 @@ class TestAuthVerifyEmail:
             fake_create_token_factory(EMAIL_VERIFICATION, "success_token")
         )
 
-        # Sign up.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -669,7 +701,17 @@ class TestAuthVerifyEmail:
         # The verification token should not be expired.
         assert is_in_future(verification_token_modified.expires_at)
 
-    def test_verify_email_expired(self, client, create_test_db, monkeypatch):
+
+    def test_verify_email_expired(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch, 
+        signup_payload_factory
+    ):
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
+
         # monkeypatch token creation so signup uses a known raw token. The real 
         # function generates random tokens and stores only hashes, making them 
         # impossible to retrieve in tests. We need the raw verification token
@@ -679,14 +721,8 @@ class TestAuthVerifyEmail:
             fake_create_token_factory(EMAIL_VERIFICATION, "expired_token")
         )
 
-        # Sign up.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -715,7 +751,10 @@ class TestAuthVerifyEmail:
         # the token to be expired).
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email_response.json()["detail"] == AuthResponseMessages.VERIF_LINK_EXPIRED
+        assert_error_message(
+            verify_email_response, 
+            AuthResponseMessages.VERIF_LINK_EXPIRED
+        )
 
         # The verification token should not be marked used.
         verification_token_modified = create_test_db.query(VerificationTokenModel).filter_by(
@@ -725,7 +764,16 @@ class TestAuthVerifyEmail:
         assert verification_token_modified.used is False
 
 
-    def test_verify_email_used_token(self, client, create_test_db, monkeypatch):
+    def test_verify_email_used_token(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch, 
+        signup_payload_factory
+    ):
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
+
         # monkeypatch token creation so signup uses a known raw token. The real 
         # function generates random tokens and stores only hashes, making them 
         # impossible to retrieve in tests. We need the raw verification token
@@ -735,14 +783,8 @@ class TestAuthVerifyEmail:
             fake_create_token_factory(EMAIL_VERIFICATION, "used_token")
         )
 
-        # Sign up.
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -771,7 +813,8 @@ class TestAuthVerifyEmail:
         # the token as used).
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email_response.json()["detail"] == (
+        assert_error_message(
+            verify_email_response, 
             AuthResponseMessages.VERIF_LINK_ALREADY_USED
         )
 
@@ -781,10 +824,22 @@ class TestAuthVerifyEmail:
         verify_email = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token=invalid_token")
 
         assert verify_email.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email.json()["detail"] == AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
+        assert_error_message(
+            verify_email, 
+            AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
+        )
 
 
-    def test_verify_email_token_deleted_with_user(self, client, create_test_db, monkeypatch):
+    def test_verify_email_token_deleted_with_user(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch, 
+        signup_payload_factory
+    ):
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
+
         raw_token = "raw_token"
 
         # Patch token creation so signup uses a known raw token.
@@ -793,14 +848,8 @@ class TestAuthVerifyEmail:
             fake_create_token_factory(EMAIL_VERIFICATION, raw_token)
         )
 
-        signup_payload = {
-            "email": "someUser@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Some User"
-        }
-
-        # Sign up to create a user and verification token.
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -825,12 +874,22 @@ class TestAuthVerifyEmail:
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
 
         assert verify_email_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert verify_email_response.json()["detail"] == (
+        assert_error_message(
+            verify_email_response, 
             AuthResponseMessages.INVALID_UNKNOWN_VERIF_TOKEN
         )
 
 
-    def test_verify_email_commit_failure(self, client, create_test_db, monkeypatch):
+    def test_verify_email_commit_failure(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch, 
+        signup_payload_factory
+    ):
+        # Sign up a user.
+        signup_payload = signup_payload_factory()
+
         raw_token = "raw_token"
 
         # Patch token creation so signup uses a known raw token
@@ -839,14 +898,8 @@ class TestAuthVerifyEmail:
             fake_create_token_factory(EMAIL_VERIFICATION, raw_token)
         )
 
-        signup_payload = {
-            "email": "commitfail@gmail.com",
-            "password": "MyPassword@123",
-            "display_name": "Commit Fail User"
-        }
-
-        # Sign up.
         signup_response = client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
+
         assert signup_response.status_code == status.HTTP_201_CREATED
 
         user_id = uuid.UUID(signup_response.json()["id"])
@@ -876,7 +929,8 @@ class TestAuthVerifyEmail:
         verify_email_response = client.post(f"{AUTH_VERIFY_EMAIL_PREFIX}?token={raw_token}")
 
         assert verify_email_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert verify_email_response.json()["detail"] == (
+        assert_error_message(
+            verify_email_response, 
             AuthResponseMessages.ERROR_VERIFYING_EMAIL
         )
 
@@ -980,13 +1034,19 @@ class TestAuthRequestPasswordReset:
         assert len(verification_tokens) == 0
 
 
-    def test_request_password_reset_deletes_old_tokens(self, client, create_test_db, monkeypatch):
+    def test_request_password_reset_deletes_old_tokens(
+        self, 
+        client, 
+        create_test_db, 
+        monkeypatch
+    ):
 
         # Create a user manually (no signup needed) and add them to the database.
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1053,7 +1113,8 @@ class TestAuthRequestPasswordReset:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1124,7 +1185,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1226,10 +1288,10 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             "Invalid or unknown password reset token."
         )
-
 
     def test_reset_password_expired_token(self, client, create_test_db):
 
@@ -1237,7 +1299,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1266,7 +1329,8 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             "This password reset link has expired."
         )
 
@@ -1293,7 +1357,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1322,7 +1387,8 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             "This password reset link has already been used."
         )
 
@@ -1349,7 +1415,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1395,7 +1462,8 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             "Invalid or unknown password reset token."
         )
 
@@ -1406,7 +1474,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1436,7 +1505,8 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             "Password must contain at least one uppercase letter."
         )
 
@@ -1462,7 +1532,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1501,7 +1572,8 @@ class TestAuthResetPassword:
             json = reset_password_payload
         )
         assert reset_password_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert reset_password_response.json()["detail"] == (
+        assert_error_message(
+            reset_password_response, 
             AuthResponseMessages.ERROR_RESETTING_PASSWORD
         )
 
@@ -1527,7 +1599,8 @@ class TestAuthResetPassword:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("OldPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1584,7 +1657,8 @@ class TestAuthResetPassword:
         other_user = UserInternalModel(
             email = "otherUser@somedomain.com",
             hashed_password = hash_password("OtherPassword@123"),
-            display_name = "Other User"
+            display_name = "Other User",
+            username = "otheruser"
         )
         create_test_db.add(other_user)
         create_test_db.commit()
@@ -1664,7 +1738,8 @@ class TestAuthLogin:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1715,7 +1790,8 @@ class TestAuthLogin:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()
@@ -1729,7 +1805,10 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        assert_error_message(
+            login_response, 
+            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        )
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1759,7 +1838,10 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        assert_error_message(
+            login_response, 
+            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        )
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1775,6 +1857,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = False
         )
         create_test_db.add(user)
@@ -1821,6 +1904,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(user)
@@ -1868,6 +1952,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(user)
@@ -1892,7 +1977,10 @@ class TestAuthLogin:
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert login_response.json()["detail"] == AuthResponseMessages.CANT_CREATE_SESSION_TOKEN
+        assert_error_message(
+            login_response, 
+            AuthResponseMessages.CANT_CREATE_SESSION_TOKEN
+        )
 
         # No cookies should be set.
         assert login_response.cookies.get("refresh_token") is None
@@ -1918,6 +2006,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(user)
@@ -1973,6 +2062,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(user)
@@ -2020,6 +2110,7 @@ class TestAuthLogin:
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
             display_name = "Mike Smith",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(user)
@@ -2069,7 +2160,10 @@ class TestAuthLogin:
 
         # Response must still be the generic 401.
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert login_response.json()["detail"] == AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        assert_error_message(
+            login_response, 
+            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+        )
 
         # verify_password must have been called exactly once.
         assert len(calls) == 1
@@ -2193,7 +2287,10 @@ class TestAuthLogout:
         logout_response = client.post(AUTH_LOGOUT_PREFIX)
 
         assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert logout_response.json()["detail"] == AuthResponseMessages.COULD_NOT_REVOKE_SESSION
+        assert_error_message(
+            logout_response, 
+            AuthResponseMessages.COULD_NOT_REVOKE_SESSION
+        )
 
         # Cookies should still be cleared even on failure.
         set_cookie_header = logout_response.headers.get("set-cookie", "")
@@ -2280,7 +2377,8 @@ class TestAuthLogoutAll:
         other_user = UserInternalModel(
             email = "other@somedomain.com",
             hashed_password = hash_password("OtherPassword@123"),
-            display_name = "Other User"
+            display_name = "Other User",
+            username = "someuser"
         )
         create_test_db.add(other_user)
         create_test_db.commit()
@@ -2380,7 +2478,8 @@ class TestAuthLogoutAll:
         logout_response = client.post(AUTH_LOGOUT_ALL_PREFIX)
 
         assert logout_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert logout_response.json()["detail"] == (
+        assert_error_message(
+            logout_response, 
             AuthResponseMessages.COULD_NOT_REVOKE_ALL_SESSIONS
         )
 
@@ -2461,6 +2560,7 @@ class TestAuthActiveSessions:
             email = "other@somedomain.com",
             hashed_password = hash_password("OtherPassword@123"),
             display_name = "Other User",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(other_user)
@@ -2611,7 +2711,10 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
-        assert terminate_session_response.json()["detail"] == AuthResponseMessages.SESSION_NOT_FOUND
+        assert_error_message(
+            terminate_session_response, 
+            AuthResponseMessages.SESSION_NOT_FOUND
+        )
 
 
     def test_terminate_session_commit_failure(
@@ -2642,7 +2745,8 @@ class TestAuthTerminateSession:
         )
 
         assert terminate_session_response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert terminate_session_response.json()["detail"] == (
+        assert_error_message(
+            terminate_session_response, 
             AuthResponseMessages.FAILED_TERMINATE_SESSION
         )
 
@@ -2679,6 +2783,7 @@ class TestAuthTerminateSession:
             email = "otherUser@somedomain.com",
             hashed_password = hash_password("OtherPassword@123"),
             display_name = "Other User",
+            username = "someuser",
             is_verified = True
         )
         create_test_db.add(other_user)
@@ -2703,7 +2808,10 @@ class TestAuthTerminateSession:
 
         # It should fail, since we did not set an access token.
         assert terminate_session_response.status_code == status.HTTP_404_NOT_FOUND
-        assert terminate_session_response.json()["detail"] == AuthResponseMessages.SESSION_NOT_FOUND
+        assert_error_message(
+            terminate_session_response, 
+            AuthResponseMessages.SESSION_NOT_FOUND
+        )
 
         create_test_db.expire_all()
 
@@ -2854,7 +2962,8 @@ class TestAuthRefresh:
         second_refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert second_refresh_response.json()["detail"] == (
+        assert_error_message(
+            second_refresh_response, 
             AuthResponseMessages.REFRESH_TOKEN_EXPIRED_STALE
         )
 
@@ -2901,6 +3010,7 @@ class TestAuthRefresh:
             email = "otherUser@somedomain.com",
             password = "OtherPassword@123",
             display_name = "Other User",
+            username = "otheruser",
             is_verified = True
         )
 
@@ -2935,7 +3045,8 @@ class TestAuthRefresh:
         second_refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert second_refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert second_refresh_response.json()["detail"] == (
+        assert_error_message(
+            second_refresh_response, 
             AuthResponseMessages.REUSE_DETECTED_SESSIONS_REVOKED
         )
 
@@ -2961,7 +3072,8 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == (
+        assert_error_message(
+            refresh_response, 
             AuthResponseMessages.MISSING_REFRESH_TOKEN
         )
 
@@ -2973,7 +3085,10 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == AuthResponseMessages.INVALID_REFRESH_TOKEN
+        assert_error_message(
+            refresh_response, 
+            AuthResponseMessages.INVALID_REFRESH_TOKEN
+        )
 
 
     def test_refresh_expired_refresh_token_returns_401(
@@ -2998,7 +3113,10 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == AuthResponseMessages.REFRESH_TOKEN_EXPIRED
+        assert_error_message(
+            refresh_response, 
+            AuthResponseMessages.REFRESH_TOKEN_EXPIRED
+        )
 
 
     def test_refresh_atomic_update_fails_returns_401(
@@ -3032,7 +3150,10 @@ class TestAuthRefresh:
         refresh_response = client.post(AUTH_REFRESH_PREFIX)
 
         assert refresh_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert refresh_response.json()["detail"] == AuthResponseMessages.REFRESH_TOKEN_EXPIRED
+        assert_error_message(
+            refresh_response, 
+            AuthResponseMessages.REFRESH_TOKEN_EXPIRED
+        )
 
         create_test_db.expire_all()
 
@@ -3202,8 +3323,10 @@ class TestAuthExportUserData:
         export_user_data_response = client.get(AUTH_EXPORT_USER_DATA_PREFIX)
 
         assert export_user_data_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert "log in again" in export_user_data_response.json()["detail"]
-
+        assert_error_message(
+            export_user_data_response, 
+            "Your login session is too old. Please log in again before exporting your data."
+        )
         # Make sure a new DSAR log was not created.
         assert create_test_db.query(DSARLogModel).filter_by(
             user_id = user.id
@@ -3255,6 +3378,7 @@ class TestAuthExportUserData:
             email = "otherUser@somedomain.com",
             password = "OtherPassword@123",
             display_name = "Other User",
+            username = "otheruser",
             is_verified = True
         )
 
@@ -3437,6 +3561,7 @@ class TestAuthDeleteUserData:
             email = "otherUser@somedomain.com",
             password = "OtherPassword@123",
             display_name = "Other User",
+            username = "otheruser",
             is_verified = True
         )
 
@@ -3622,7 +3747,10 @@ class TestAuthDeleteUserAccount:
 
         # It should fail.
         assert delete_account_response.status_code == status.HTTP_403_FORBIDDEN
-        assert delete_account_response.json()["detail"] == AuthResponseMessages.PASSWORD_CONFIRM_REQ
+        assert_error_message(
+            delete_account_response, 
+            AuthResponseMessages.PASSWORD_CONFIRM_REQ
+        )
 
         # User should still exist.
         assert create_test_db.get(UserInternalModel, user_id) is not None
@@ -3648,6 +3776,7 @@ class TestAuthDeleteUserAccount:
             email = "otherUser@somedomain.com",
             password = "OtherPassword@123",
             display_name = "Other User",
+            username = "otheruser",
             is_verified = True
         )
 
@@ -3742,7 +3871,10 @@ class TestAuthPasswordConfirmation:
         )
 
         assert confirm_password_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert confirm_password_response.json()["detail"] == AuthResponseMessages.INVALID_PASSWORD
+        assert_error_message(
+            confirm_password_response, 
+            AuthResponseMessages.INVALID_PASSWORD
+        )
 
         create_test_db.expire_all()
 
@@ -3818,7 +3950,10 @@ class TestAuthPasswordConfirmation:
         response = client.delete(AUTH_DELETE_USER_ACCOUNT_PREFIX)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert response.json()["detail"] == AuthResponseMessages.PASSWORD_CONFIRM_REQ
+        assert_error_message(
+            response, 
+            AuthResponseMessages.PASSWORD_CONFIRM_REQ
+        )
 
 
     def test_confirm_password_fails_if_no_access_token(self, client):
@@ -3853,7 +3988,8 @@ class TestAuthPasswordConfirmation:
         )
 
         assert confirm_password_response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert confirm_password_response.json()["detail"] == (
+        assert_error_message(
+            confirm_password_response, 
             "Your login session is too old. Please log in again."
         )
 

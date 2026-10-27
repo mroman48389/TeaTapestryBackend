@@ -5,6 +5,8 @@ from dataclasses import dataclass
 class AuthResponseMessages: #pragma: no cover
     #FAILED_TO_CREATE_VERIFICATION_TOKEN = CommonMessages.FAILED_TO_CREATE_VERIFICATION_TOKEN
     EMAIL_ALREADY_EXISTS: str = "A user with this email address already exists."
+    USERNAME_ALREADY_EXISTS: str = "A user with this username already exists."
+    EMAIL_OR_USERNAME_ALREADY_EXISTS: str = "A user with this email address or username already exists."
     ERROR_CREATING_ACCOUNT: str = "An unexpected error occurred while creating the account."
     ERROR_REFRESH_ACCOUNT: str = "An unexpected error occurred while refreshing the new account."
     FAILED_TO_CREATE_VERIF_TOKEN: str = "Failed to create verification token."

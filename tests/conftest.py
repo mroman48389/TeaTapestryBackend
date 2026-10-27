@@ -343,6 +343,7 @@ def create_test_user(create_test_db):
         email = "testUser@example.com",
         password = "MyPassword@123",
         display_name = "Test User",
+        username = "testuser",
         **overrides
     ):
         
@@ -350,6 +351,7 @@ def create_test_user(create_test_db):
             email = email,
             hashed_password = hash_password(password),
             display_name = display_name,
+            username = username,
             **overrides
         )
 
@@ -512,3 +514,26 @@ def email_capture(monkeypatch):
     )
 
     return sent_emails
+
+
+
+@pytest.fixture
+def signup_payload_factory():
+
+    '''
+        Factory fixture that returns a signup payload so we don't need to 
+        repeat this code everywhere.
+    '''
+    def _signup_payload(**overrides):
+        payload = {
+            "email": "someUser@gmail.com",
+            "password": "MyPassword@123",
+            "display_name": "Some User",
+            "username": "someuser",
+        }
+
+        payload.update(overrides)
+
+        return payload
+
+    return _signup_payload

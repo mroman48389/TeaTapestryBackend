@@ -33,9 +33,34 @@ class UserInternalModel(Base):
         nullable = False,
     )
 
+    # display_name does not have to be unique. Allow letters, numbers, hyphens, whitespace. 
+    # Used to identify the user in UI  such as the app bar, user profile display, 
+    # comments, reviews, chatting.
     display_name: Mapped[str] = mapped_column(
         String,
         nullable = False,
+    )
+
+    # username must be unique. Allows lowercase letters, numbers, underscores, hyphens. Normalized and 
+    # stored as all lowercase. It will be used for looking up users, querying databases, URLs, mentions.
+    username: Mapped[str] = mapped_column(
+        String(30),
+        unique = True,
+        nullable = False,
+        index = True
+    )
+
+    bio: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable = True,
+    )
+
+    # Reference to where the avatar image is stored. (Currently, we automatically generate
+    # initials instead. If we implement this in the future, we need a way of preventing
+    # inappropriate image uploads and / or reporting such things).
+    avatar_url: Mapped[str | None] = mapped_column(
+        String,
+        nullable = True,
     )
 
     # DateTime(timezone = True) and datetime.now(timezone.utc) give us 

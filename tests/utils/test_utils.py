@@ -10,6 +10,7 @@ from src.db.types.sqlite_compatible_array import SQLiteCompatibleArray
 from src.constants.model_metadata_constants import DELIMITER_VALUE
 from src.db.models.auth.verification_token_model import VerificationTokenModel
 
+
 def get_dummy_value_for_param_type(param_type):
     """Return a dummy value based on the parameter type."""
     if param_type is int:
@@ -22,6 +23,7 @@ def get_dummy_value_for_param_type(param_type):
     else:
         return "test"
 
+
 def get_path_with_dummy_params(route: APIRoute) -> str:
     """
         Replace dynamic parameters in the route path, if they exist, with 
@@ -33,12 +35,14 @@ def get_path_with_dummy_params(route: APIRoute) -> str:
         path = path.replace(f"{{{param.name}}}", val)
     return path
 
+
 def get_id_from_tea_name(name: str) -> int:
     with get_session_cm() as session:
         obj = session.query(TeaProfileModel).filter_by(name = name).first()
         if not obj:
             raise ValueError(f"No tea profile found with name = {name}")
         return obj.id
+
     
 def make_df_sqlite_compatible(df, model, delimiter = DELIMITER_VALUE):
     for col in model.__table__.columns:
@@ -51,10 +55,12 @@ def make_df_sqlite_compatible(df, model, delimiter = DELIMITER_VALUE):
 
     return df
 
+
 def get_auth_headers(access_token: str, refresh_token: str):
     return {
         "Cookie": f"access_token={access_token}; refresh_token={refresh_token}"
     }
+
 
 def get_empty_user_tea_profile_notes_body(as_json: bool = False):
     dt = datetime.now(timezone.utc)
@@ -68,6 +74,7 @@ def get_empty_user_tea_profile_notes_body(as_json: bool = False):
         body["updated_at"] = dt
 
     return body
+
 
 def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
     """
@@ -89,3 +96,8 @@ def fake_create_token_factory(purpose: str, raw_token = "testtoken123"):
         return raw_token
     
     return fake_create_raw_verification_token
+
+
+def assert_error_message(response, expected_message):
+    error = response.json()
+    assert error["error"]["message"] == expected_message

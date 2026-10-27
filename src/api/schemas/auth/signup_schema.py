@@ -16,6 +16,11 @@ class SignupSchema(BaseModel):
         max_length = 30,
         pattern = r"^[A-Za-z0-9\-\s]+$"
     )
+    username: str = Field(
+        min_length = 3,
+        max_length = 30,
+        pattern = r"^[a-z0-9_-]+$"
+    )
 
     # Prevent client from adding extra fields.
     model_config = ConfigDict(extra = "forbid")

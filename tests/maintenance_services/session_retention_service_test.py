@@ -17,7 +17,8 @@ class TestSessionRetentionService:
         user = UserInternalModel(
             email = "someUsername@somedomain.com",
             hashed_password = hash_password("MyPassword@123"),
-            display_name = "Some User"
+            display_name = "Some User",
+            username = "someuser"
         )
         create_test_db.add(user)
         create_test_db.commit()

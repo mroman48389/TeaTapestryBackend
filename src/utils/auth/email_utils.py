@@ -1,5 +1,6 @@
 import resend
 
+from src.core.env import IS_RUNNING_TESTS
 from src.utils.log_utils import safe_debug, safe_exception
 from src.utils.auth.token_utils import build_frontend_token_link
 from src.core.config import settings
@@ -104,11 +105,12 @@ def send_verification_email(user: UserInternalModel, raw_token: str):
         disregard_msg = "If you did not sign up for a Tea Tapestry account, please disregard this email."
     )
 
-    send_email(
-        to_email = user.email,
-        subject = "Verify Your Tea Tapestry Account",
-        html = html,
-    )
+    if not IS_RUNNING_TESTS:
+        send_email(
+            to_email = user.email,
+            subject = "Verify Your Tea Tapestry Account",
+            html = html,
+        )
 
 
 def send_password_reset_email(user: UserInternalModel, raw_token: str):
@@ -128,11 +130,12 @@ def send_password_reset_email(user: UserInternalModel, raw_token: str):
         disregard_msg = "If you did not request a password reset, please disregard this email."
     )
 
-    send_email(
-        to_email = user.email,
-        subject = "Reset Your Tea Tapestry Password",
-        html = html,
-    )
+    if not IS_RUNNING_TESTS:
+        send_email(
+            to_email = user.email,
+            subject = "Reset Your Tea Tapestry Password",
+            html = html,
+        )
 
 
 def send_email(to_email: str, subject: str, html: str):
