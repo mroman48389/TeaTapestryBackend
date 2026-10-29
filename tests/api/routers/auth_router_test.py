@@ -323,7 +323,8 @@ class TestAuthSendVerification:
         self, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
 
         # Sign up a user.
@@ -335,11 +336,7 @@ class TestAuthSendVerification:
         user_id = uuid.UUID(signup_response.json()["id"])
 
         # Sign in to authenticate the user.
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
         assert login_response.status_code == status.HTTP_200_OK
 
@@ -388,7 +385,8 @@ class TestAuthSendVerification:
         monkeypatch, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
         # Sign up a user.
         signup_payload = signup_payload_factory()
@@ -406,11 +404,7 @@ class TestAuthSendVerification:
         assert original_token is not None
 
         # Log in to authenticate the user.
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
         assert login_response.status_code == status.HTTP_200_OK
 
@@ -450,7 +444,8 @@ class TestAuthSendVerification:
         self, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
         # Sign up a user.
         signup_payload = signup_payload_factory()
@@ -465,12 +460,8 @@ class TestAuthSendVerification:
         user.is_verified = True
         create_test_db.commit()
 
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
-        # Authenticate
+        # Authenticate.
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_200_OK
@@ -493,7 +484,8 @@ class TestAuthSendVerification:
         monkeypatch, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
         # Create and authenticate user.
         signup_payload = signup_payload_factory()
@@ -503,11 +495,7 @@ class TestAuthSendVerification:
 
         user_id = uuid.UUID(signup_response.json()["id"])
 
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
         assert login_response.status_code == status.HTTP_200_OK
 
@@ -543,17 +531,14 @@ class TestAuthSendVerification:
         monkeypatch, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
         # Create and authenticate a user.
         signup_payload = signup_payload_factory()
         client.post(AUTH_SIGNUP_PREFIX, json = signup_payload)
 
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
 
         assert login_response.status_code == status.HTTP_200_OK
@@ -589,7 +574,8 @@ class TestAuthSendVerification:
         monkeypatch, 
         client, 
         create_test_db, 
-        signup_payload_factory
+        signup_payload_factory,
+        login_payload_factory
     ):
         # Create and authenticate a user.
         signup_payload = signup_payload_factory()
@@ -607,11 +593,7 @@ class TestAuthSendVerification:
 
         user_id = uuid.UUID(signup_response.json()["id"])
 
-        login_payload = {
-            "email": signup_payload["email"],
-            "password": signup_payload["password"]
-        }
-
+        login_payload = login_payload_factory()
         login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
         assert login_response.status_code == status.HTTP_200_OK
 
@@ -1730,7 +1712,11 @@ class TestAuthResetPassword:
 
 class TestAuthLogin:
 
-    def test_login_success(self, client, create_test_db):
+    def test_login_success(
+        self, 
+        client, 
+        create_test_db,
+    ):
         # Create and add a user. 
         # 
         # NOTE: the domain gets normalized by EmailStr to all lowercase, so do NOT include
@@ -1746,7 +1732,7 @@ class TestAuthLogin:
 
         # Log in with the same email and password.
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
@@ -1798,7 +1784,7 @@ class TestAuthLogin:
 
         # Try to log in with the same email but the wrong password.
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "WrongPassword@123"
         }
 
@@ -1807,7 +1793,7 @@ class TestAuthLogin:
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert_error_message(
             login_response, 
-            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+            AuthResponseMessages.INVALID_EMAIL_USERNAME_PASSWORD
         )
 
         # No cookies should be set.
@@ -1831,7 +1817,7 @@ class TestAuthLogin:
     def test_login_unknown_email(self, client, create_test_db):
         # Try to log in with an account that doesn't exist in the database.
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
@@ -1840,7 +1826,7 @@ class TestAuthLogin:
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert_error_message(
             login_response, 
-            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+            AuthResponseMessages.INVALID_EMAIL_USERNAME_PASSWORD
         )
 
         # No cookies should be set.
@@ -1864,7 +1850,7 @@ class TestAuthLogin:
         create_test_db.commit()
 
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123",
         }
 
@@ -1911,7 +1897,7 @@ class TestAuthLogin:
         create_test_db.commit()
 
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123",
         }
 
@@ -1970,7 +1956,7 @@ class TestAuthLogin:
         monkeypatch.setattr(Session, "commit", fail_commit)
 
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
@@ -2013,7 +1999,7 @@ class TestAuthLogin:
         create_test_db.commit()
 
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
@@ -2069,7 +2055,7 @@ class TestAuthLogin:
         create_test_db.commit()
 
         payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
@@ -2117,11 +2103,11 @@ class TestAuthLogin:
         create_test_db.commit()
 
         login_payload = {
-            "email": "someUsername@somedomain.com",
+            "identifier": "someUsername@somedomain.com",
             "password": "MyPassword@123"
         }
 
-        login_response = client.post(AUTH_LOGIN_PREFIX, json=login_payload)
+        login_response = client.post(AUTH_LOGIN_PREFIX, json = login_payload)
         assert login_response.status_code == status.HTTP_200_OK
 
         access_token = login_response.json()["access_token"]
@@ -2152,7 +2138,7 @@ class TestAuthLogin:
 
         # Attempt login with an email that does not exist
         login_payload = {
-            "email": "nonexistent@somedomain.com",
+            "identifier": "nonexistent@somedomain.com",
             "password": "SomePassword@123"
         }
 
@@ -2162,7 +2148,7 @@ class TestAuthLogin:
         assert login_response.status_code == status.HTTP_401_UNAUTHORIZED
         assert_error_message(
             login_response, 
-            AuthResponseMessages.INVALID_EMAIL_PASSWORD
+            AuthResponseMessages.INVALID_EMAIL_USERNAME_PASSWORD
         )
 
         # verify_password must have been called exactly once.

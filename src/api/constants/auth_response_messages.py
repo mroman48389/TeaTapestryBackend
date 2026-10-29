@@ -25,7 +25,7 @@ class AuthResponseMessages: #pragma: no cover
     INVALID_PASSWORD: str = "Invalid password."
     FAILED_TO_CONFIRM_PASSWORD: str = "Failed to confirm password."
     ERROR_RESETTING_PASSWORD: str = "An unexpected error occurred while resetting the password."
-    INVALID_EMAIL_PASSWORD: str = "Invalid email or password."
+    INVALID_EMAIL_USERNAME_PASSWORD: str = "Invalid email, username, or password."
     CANT_CREATE_SESSION_TOKEN: str = "Could not create session token."
     COULD_NOT_REVOKE_SESSION: str = "Could not revoke session token."
     ERROR_VERIFYING_EMAIL: str = "An unexpected error occurred while verifying the email."

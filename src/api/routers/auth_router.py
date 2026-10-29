@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette import status
@@ -841,9 +842,12 @@ def login(
     with sentry_sdk.start_span(op = AUTH, name = "login"):
         sentry_sdk.set_tag("endpoint", "login")
 
-        # Look up the user.
+        # Look up the user. The identifier can be their username or password.
         user = session.query(UserInternalModel).filter(
-            UserInternalModel.email == payload.email
+            or_(
+                UserInternalModel.email == payload.identifier,
+                UserInternalModel.username == payload.identifier,
+            )
         ).first()
 
         # Make invalid logins take the same amount of time as valid ones rather than
@@ -862,7 +866,7 @@ def login(
         if (not user) or (not password_ok):
             raise HTTPException(
                 status_code = status.HTTP_401_UNAUTHORIZED,
-                detail = AuthResponseMessages.INVALID_EMAIL_PASSWORD
+                detail = AuthResponseMessages.INVALID_EMAIL_USERNAME_PASSWORD
             )
 
         # Generate tokens.

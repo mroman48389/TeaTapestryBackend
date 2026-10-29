@@ -516,7 +516,6 @@ def email_capture(monkeypatch):
     return sent_emails
 
 
-
 @pytest.fixture
 def signup_payload_factory():
 
@@ -537,3 +536,21 @@ def signup_payload_factory():
         return payload
 
     return _signup_payload
+
+
+@pytest.fixture
+def login_payload_factory(signup_payload_factory):
+
+    def _login_payload(**overrides):
+        signup_payload = signup_payload_factory()
+
+        payload = {
+            "identifier": signup_payload["email"],
+            "password": signup_payload["password"],
+        }
+
+        payload.update(overrides)
+
+        return payload
+
+    return _login_payload
